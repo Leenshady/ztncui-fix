@@ -55,21 +55,158 @@ chmod 400 .env
 npm start
 ```
 
-若 `etc/passwd` 不存在，首次启动会生成**随机**管理员密码，并**只在控制台打印一次**；用户名固定为 `admin`，首次登录会被强制修改密码。已有 `etc/passwd` 不会被覆盖。仓库里的 `etc/default.passwd` 仅作旧版参考，**不再推荐使用**。
+打开 `http://localhost:3000`。程序默认只监听 `localhost`；需要监听所有网卡时必须显式设置 `HTTP_ALL_INTERFACES=yes`，并放在提供 HTTPS 的反向代理后。
 
-自动化部署可在启动前通过环境变量注入初始密码：
+初始密码的生成与查看、密码文件制作、全部启动参数见下面两节。
 
-```dotenv
-# 二选一：直接给密码，或指向只读密钥文件（后者更推荐，避免出现在进程环境里）
-ZTNCUI_ADMIN_PASSWORD=<初始密码>
-ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password
-# 可选：把密码库存到源码目录之外，默认 etc/passwd
-ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
-# 可选：固定 session 密钥，使重启后登录态保持有效
-SESSION_SECRET=<长随机字符串>
+## 初始密码
+
+本分支**不再提供固定默认口令**，`etc/default.passwd` 仅作旧版参考，请不要再复制到 `etc/passwd`。
+
+密码文件是在**首次有请求需要读取用户库**时创建的（通常是第一次提交登录表单），不是 `npm start` 完成的瞬间。规则如下：
+
+1. 若 `ZTNCUI_PASSWD_FILE`（默认 `etc/passwd`）不存在：
+   - 优先读取 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向的纯文本文件；
+   - 其次读取环境变量 `ZTNCUI_ADMIN_PASSWORD`；
+   - 两者都没有时，用 `crypto.randomBytes(24).toString('base64url')` 生成随机密码。
+2. 密码以 argon2 哈希写入，用户标记为 `pass_set:false`，**首次登录强制修改密码**；已有密码文件不会被覆盖。
+3. 随机密码**只在控制台打印一次**，随后无法再次查看明文。
+
+### 查看随机密码
+
+npm：
+
+```shell
+npm start
+# 出现 "[ztncui] Initial password: xxxx" 时立即记下
 ```
 
-打开 `http://localhost:3000`。程序默认只监听 `localhost`；需要监听所有网卡时必须显式设置 `HTTP_ALL_INTERFACES=yes`，并放在提供 HTTPS 的反向代理后，不要把明文 HTTP 直接暴露到公网。
+pm2：
+
+```shell
+pm2 logs ztncui --lines 200
+pm2 describe ztncui | grep -i 'log path'
+tail -n 200 ~/.pm2/logs/ztncui-out.log
+```
+
+Windows 下 pm2 日志位于 `%USERPROFILE%\.pm2\logs\ztncui-out.log`。`console.log` 写入 out 日志而不是 error 日志。
+
+Docker：
+
+```shell
+docker logs ztncui-fix | grep 'Initial password'
+```
+
+### 生成密码文件（推荐）
+
+`ZTNCUI_ADMIN_PASSWORD_FILE` 指向的是**纯文本密码文件**，不是二进制密钥。文件内容就是密码本身，末尾有无换行都可以。
+
+Linux：
+
+```shell
+sudo install -d -m 700 /etc/ztncui
+umask 077
+openssl rand -hex 24 > /etc/ztncui/admin_secret
+sudo chmod 600 /etc/ztncui/admin_secret
+```
+
+Windows PowerShell：
+
+```powershell
+$bytes = New-Object byte[] 24
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$secret = [Convert]::ToHexString($bytes)
+$path = "$env:USERPROFILE\ztncui\admin_secret"
+New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
+[IO.File]::WriteAllText($path, $secret)
+```
+
+在 `.env` 中引用：
+
+```dotenv
+ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
+```
+
+pm2 在 Windows 下建议用正斜杠避免转义：
+
+```js
+ZTNCUI_ADMIN_PASSWORD_FILE: 'C:/Users/<用户名>/ztncui/admin_secret'
+```
+
+Docker 中只读挂载：
+
+```shell
+-v /etc/ztncui/admin_secret:/run/secrets/ztncui_admin_password:ro \
+-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password
+```
+
+### 密码丢失或重置
+
+- 已能登录：在 Web 界面的 `Users → Set password` 修改。
+- 尚未初始化：删除密码库后重启并触发一次登录，会重新生成一组密码：
+
+```shell
+rm /path/to/ztncui-passwd
+pm2 restart ztncui
+pm2 logs ztncui --lines 200
+```
+
+- 已有账号时**不要删除密码库**，否则所有用户配置都会丢失。
+
+## 启动参数
+
+所有参数都通过环境变量传入：源码运行写在 `src/.env`，pm2 写在 `ecosystem.config.js` 的 `env`，Docker 使用 `-e` 或 `--env-file`。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `ZT_TOKEN` | 读取 `/var/lib/zerotier-one/authtoken.secret` | ZeroTier 本地控制 API 的 token |
+| `ZT_ADDR` | `127.0.0.1:9993` | 控制器 API 地址 |
+| `HTTP_PORT` | `3000` | HTTP 监听端口 |
+| `HTTP_ALL_INTERFACES` | 未设置 | 设置后监听所有网卡；否则只监听 `localhost` |
+| `HTTPS_PORT` | 未设置 | 启用 HTTPS 的端口；证书为 `etc/tls/fullchain.pem` 与 `etc/tls/privkey.pem` |
+| `HTTPS_HOST` | 未设置 | HTTPS 监听地址；未设置时监听所有网卡 |
+| `NODE_ENV` | 未设置 | 生产环境设为 `production` |
+| `ZTNCUI_ADMIN_PASSWORD` | 未设置 | 初始 admin 密码；与下一项二选一 |
+| `ZTNCUI_ADMIN_PASSWORD_FILE` | 未设置 | 初始密码文件路径，优先级高于上一项 |
+| `ZTNCUI_PASSWD_FILE` | `etc/passwd` | 用户密码库路径，Docker 镜像中指向挂载卷 |
+| `SESSION_SECRET` | 每次启动随机生成 | session 签名密钥；固定后重启仍可保持登录态 |
+
+示例：`src/.env`
+
+```dotenv
+ZT_TOKEN=<authtoken.secret 内容>
+ZT_ADDR=127.0.0.1:9993
+HTTP_PORT=3000
+NODE_ENV=production
+ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
+ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
+SESSION_SECRET=<openssl rand -hex 32 生成的值>
+```
+
+示例：pm2 `ecosystem.config.js`
+
+```js
+module.exports = {
+  apps: [{
+    name: 'ztncui',
+    script: './src/bin/www',
+    env: {
+      NODE_ENV: 'production',
+      HTTP_PORT: '3000',
+      ZTNCUI_ADMIN_PASSWORD_FILE: '/etc/ztncui/admin_secret',
+      ZTNCUI_PASSWD_FILE: '/var/lib/zerotier-one/ztncui-passwd',
+      SESSION_SECRET: '<long-random-string>'
+    }
+  }]
+}
+```
+
+```shell
+pm2 start ecosystem.config.js && pm2 save
+pm2 logs ztncui --lines 200
+```
+
+Docker 示例见下一节。
 
 ## Docker
 
@@ -158,21 +295,158 @@ chmod 400 .env
 npm start
 ```
 
-If `etc/passwd` does not exist, a **random** admin password is generated and printed **once** to the console. The username is always `admin`, and the first login forces a password change. An existing `etc/passwd` is never overwritten. `etc/default.passwd` is kept only as a legacy reference and is **no longer recommended**.
+Open `http://localhost:3000`. The app listens on `localhost` only. To bind all interfaces you must explicitly set `HTTP_ALL_INTERFACES=yes`; put the app behind an HTTPS reverse proxy and never expose plain HTTP directly to the internet.
 
-For unattended installs, inject the initial password before starting:
+See the next two sections for how the initial password is generated and viewed, how to create a secret file, and the full list of startup parameters.
 
-```dotenv
-# Choose one: a literal password, or a read-only secret file (preferred)
-ZTNCUI_ADMIN_PASSWORD=<initial password>
-ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password
-# Optional: keep the password store outside the source tree (default etc/passwd)
-ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
-# Optional: stable session secret so sessions survive restarts
-SESSION_SECRET=<long random string>
+## Initial password
+
+This fork **does not ship a fixed default password**. `etc/default.passwd` is kept only as a legacy reference; do not copy it to `etc/passwd`.
+
+The password file is created when a request first needs the user store (normally the first login form submission), not necessarily the moment `npm start` finishes:
+
+1. If `ZTNCUI_PASSWD_FILE` (default `etc/passwd`) does not exist:
+   - read the plain-text file pointed to by `ZTNCUI_ADMIN_PASSWORD_FILE` first;
+   - otherwise read the `ZTNCUI_ADMIN_PASSWORD` environment variable;
+   - otherwise generate a random password with `crypto.randomBytes(24).toString('base64url')`.
+2. The password is stored as an argon2 hash, the user is marked `pass_set:false`, and the **first login forces a password change**. An existing password file is never overwritten.
+3. A generated password is printed **once** to stdout and cannot be recovered afterwards.
+
+### Viewing a generated password
+
+npm:
+
+```shell
+npm start
+# Note the line "[ztncui] Initial password: xxxx" immediately
 ```
 
-Open `http://localhost:3000`. The app listens on `localhost` only. To bind all interfaces you must explicitly set `HTTP_ALL_INTERFACES=yes`; put the app behind an HTTPS reverse proxy and never expose plain HTTP directly to the internet.
+pm2:
+
+```shell
+pm2 logs ztncui --lines 200
+pm2 describe ztncui | grep -i 'log path'
+tail -n 200 ~/.pm2/logs/ztncui-out.log
+```
+
+On Windows, pm2 logs are under `%USERPROFILE%\.pm2\logs\ztncui-out.log`. `console.log` goes to the out log, not the error log.
+
+Docker:
+
+```shell
+docker logs ztncui-fix | grep 'Initial password'
+```
+
+### Creating a secret file (recommended)
+
+`ZTNCUI_ADMIN_PASSWORD_FILE` points to a **plain-text password file**, not a binary key. Its content is the password itself; a trailing newline is fine.
+
+Linux:
+
+```shell
+sudo install -d -m 700 /etc/ztncui
+umask 077
+openssl rand -hex 24 > /etc/ztncui/admin_secret
+sudo chmod 600 /etc/ztncui/admin_secret
+```
+
+Windows PowerShell:
+
+```powershell
+$bytes = New-Object byte[] 24
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$secret = [Convert]::ToHexString($bytes)
+$path = "$env:USERPROFILE\ztncui\admin_secret"
+New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
+[IO.File]::WriteAllText($path, $secret)
+```
+
+Reference it in `.env`:
+
+```dotenv
+ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
+```
+
+On Windows, pm2 should use forward slashes to avoid escaping issues:
+
+```js
+ZTNCUI_ADMIN_PASSWORD_FILE: 'C:/Users/<user>/ztncui/admin_secret'
+```
+
+Mount it read-only in Docker:
+
+```shell
+-v /etc/ztncui/admin_secret:/run/secrets/ztncui_admin_password:ro \
+-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password
+```
+
+### Lost password / reset
+
+- If you can still log in: change it under `Users → Set password` in the web UI.
+- If not yet initialized: delete the password store, restart, and trigger one login to generate a new password:
+
+```shell
+rm /path/to/ztncui-passwd
+pm2 restart ztncui
+pm2 logs ztncui --lines 200
+```
+
+- Do **not** delete the password store once real accounts exist; all user configuration will be lost.
+
+## Startup parameters
+
+All parameters are environment variables: put them in `src/.env` for source installs, in the `env` block of `ecosystem.config.js` for pm2, or pass them with `-e` / `--env-file` for Docker.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ZT_TOKEN` | read `/var/lib/zerotier-one/authtoken.secret` | Token for ZeroTier's local controller API |
+| `ZT_ADDR` | `127.0.0.1:9993` | Controller API address |
+| `HTTP_PORT` | `3000` | HTTP listen port |
+| `HTTP_ALL_INTERFACES` | unset | Bind all interfaces when set; otherwise `localhost` only |
+| `HTTPS_PORT` | unset | HTTPS port; certs are `etc/tls/fullchain.pem` and `etc/tls/privkey.pem` |
+| `HTTPS_HOST` | unset | HTTPS bind address; all interfaces when unset |
+| `NODE_ENV` | unset | Set to `production` for deployments |
+| `ZTNCUI_ADMIN_PASSWORD` | unset | Initial admin password; choose one of this or the next variable |
+| `ZTNCUI_ADMIN_PASSWORD_FILE` | unset | Path to the initial password file; takes precedence |
+| `ZTNCUI_PASSWD_FILE` | `etc/passwd` | User password store; points to the mounted volume in Docker |
+| `SESSION_SECRET` | random per start | Session signing secret; set it to keep sessions across restarts |
+
+Example `src/.env`:
+
+```dotenv
+ZT_TOKEN=<contents of authtoken.secret>
+ZT_ADDR=127.0.0.1:9993
+HTTP_PORT=3000
+NODE_ENV=production
+ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
+ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
+SESSION_SECRET=<value from openssl rand -hex 32>
+```
+
+Example pm2 `ecosystem.config.js`:
+
+```js
+module.exports = {
+  apps: [{
+    name: 'ztncui',
+    script: './src/bin/www',
+    env: {
+      NODE_ENV: 'production',
+      HTTP_PORT: '3000',
+      ZTNCUI_ADMIN_PASSWORD_FILE: '/etc/ztncui/admin_secret',
+      ZTNCUI_PASSWD_FILE: '/var/lib/zerotier-one/ztncui-passwd',
+      SESSION_SECRET: '<long-random-string>'
+    }
+  }]
+}
+```
+
+```shell
+pm2 start ecosystem.config.js && pm2 save
+pm2 logs ztncui --lines 200
+```
+
+See the Docker section below for a container example.
 
 ## Docker
 
