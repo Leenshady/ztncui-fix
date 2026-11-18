@@ -63,7 +63,7 @@ npm start
 
 本分支**不再提供固定默认口令**，`etc/default.passwd` 仅作旧版参考，请不要再复制到 `etc/passwd`。
 
-密码文件在**应用启动时**创建，随机密码会立即打印到控制台，无需先尝试登录。规则如下：
+密码文件在**应用启动时**创建，无需先尝试登录。**推荐不设置初始密码变量**，让应用随机生成密码并立即打印到控制台。规则如下：
 
 1. 若 `ZTNCUI_PASSWD_FILE`（默认 `etc/passwd`）不存在：
    - 优先读取 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向的纯文本文件；
@@ -97,7 +97,7 @@ Docker：
 docker logs ztncui-fix | grep 'Initial password'
 ```
 
-### 生成密码文件（推荐）
+### 生成密码文件（可选）
 
 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向的是**纯文本密码文件**，不是二进制密钥。文件内容就是密码本身，末尾有无换行都可以。
 
@@ -177,18 +177,35 @@ pm2 logs ztncui --lines 200
 | `SESSION_COOKIE_SECURE` | 未设置 | 设为 `yes` 时给 cookie 加 `Secure`；必须已启用 HTTPS |
 | `TRUST_PROXY` | 未设置 | 反向代理后启用 `trust proxy`，配合 `Secure` cookie 使用 |
 
-示例：`src/.env`
+示例：`src/.env`（源码 / pm2 部署；Docker 镜像已把数据目录预设在卷内，无需重复设置 `ZTNCUI_DATA_DIR`）：
 
 ```dotenv
+# 单一数据目录：密码库、session、TLS 证书、签名密钥与成员备注都放在这里。
+# 指向源码树之外，升级时只需保留这个目录；不设置时默认为 src/etc。
+ZTNCUI_DATA_DIR=/srv/ztncui-data
+
 ZT_TOKEN=<authtoken.secret 内容>
 ZT_ADDR=127.0.0.1:9993
 HTTP_PORT=3000
 NODE_ENV=production
-ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
-ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
-SESSION_SECRET=<openssl rand -hex 32 生成的值>
-SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+
+# 推荐：留空即可，应用会在启动时随机生成初始密码并打印到控制台，首次登录强制改密。
+# 若要自己指定初始密码，再取消下面这行的注释，指向一个纯文本密码文件（不是密码库，建议 0600 权限）：
+# ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
+
+# 密码库与 session 目录默认由 ZTNCUI_DATA_DIR 派生：
+#   $ZTNCUI_DATA_DIR/passwd、$ZTNCUI_DATA_DIR/sessions
+# 仅在需要覆盖时才显式指定下面两项：
+# ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
+# SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+
+# 留空时自动生成一次并保存到 $ZTNCUI_DATA_DIR/session.secret，重启不掉登录
+# SESSION_SECRET=<openssl rand -hex 32 生成的值>
 SESSION_TTL=86400
+
+# 可选：换一个引导 .env 的位置；此外仍会读取 $ZTNCUI_DATA_DIR/.env
+# ZTNCUI_ENV_FILE=/etc/ztncui/bootstrap.env
+
 # 仅在已启用 HTTPS / 反向代理时打开下面两项
 # SESSION_COOKIE_SECURE=yes
 # TRUST_PROXY=1
@@ -214,27 +231,32 @@ Docker 示例见下一节。
 
 ## Docker
 
-仓库根目录提供多阶段构建的 `Dockerfile`，会同时安装 zerotier-one 与 ztncui：
+仓库根目录提供多阶段构建的 `Dockerfile`（同时安装 zerotier-one 与 ztncui）和 `docker-compose.yml`。**推荐用 Compose**，它已配好 host 网络、所需 capabilities、TUN 设备和命名卷：
+
+```shell
+docker compose up -d
+# 修改了 Dockerfile 或本地源码时：
+docker compose up -d --build
+```
+
+等效的 `docker run` 示例（host 网络便于控制器通过 UDP 9993 通信；卷名与 Compose、备份章节保持一致）：
 
 ```shell
 docker build -t ztncui-fix .
-```
-
-Linux 示例（推荐 host 网络，便于控制器通过 UDP 9993 通信）：
-
-```shell
 docker run -d --name ztncui-fix \
   --restart unless-stopped \
   --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --device /dev/net/tun \
-  -v ztncui-zt:/var/lib/zerotier-one \
+  -v ztncui-data:/var/lib/zerotier-one \
   ztncui-fix
 ```
 
 如不使用 host 网络，请至少映射 `-p 3000:3000 -p 9993:9993/udp`，并额外加 `-e HTTP_ALL_INTERFACES=yes`（镜像默认只监听 `localhost`）。对外提供访问时请务必经由 HTTPS 反向代理。
 
-镜像**不包含默认口令**。首次启动会在挂载卷的 `/var/lib/zerotier-one/ztncui-passwd` 生成随机密码，可用 `docker logs ztncui-fix` 查看一次；容器重建后仍读取同一文件。也可挂载密钥文件后传入 `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`。首次登录会强制修改密码。session 文件写入挂载卷的 `ztncui-sessions/` 目录，不会随容器重建丢失。identity 与 `authtoken.secret` 同样只生成在挂载卷中，镜像本身不含任何身份密钥。
+镜像**不包含默认口令**。推荐不设置初始密码变量：首次启动会生成随机密码并打印到控制台，用 `docker logs ztncui-fix | grep 'Initial password'` 查看一次；首次登录强制改密，容器重建后仍读取同一文件。如需自己指定初始密码，可只读挂载一个纯文本密码文件并传入 `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`（见上节）。
+
+所有可变状态都在同一个挂载卷中：密码库 `ztncui-passwd`、session `ztncui-sessions/`、TLS 证书与签名密钥 `ztncui-data/`。容器重建后仍读取同一份数据。identity 与 `authtoken.secret` 同样只生成在挂载卷中，镜像本身不含任何身份密钥。
 
 ## 升级与配置保留
 
@@ -375,7 +397,7 @@ See the next two sections for how the initial password is generated and viewed, 
 
 This fork **does not ship a fixed default password**. `etc/default.passwd` is kept only as a legacy reference; do not copy it to `etc/passwd`.
 
-The password file is created **at application startup** and a generated password is printed to the console immediately, with no login attempt required:
+The password file is created **at application startup**, with no login attempt required. **Leaving the initial-password variables unset is recommended** — the app then generates a random password and prints it to the console immediately:
 
 1. If `ZTNCUI_PASSWD_FILE` (default `etc/passwd`) does not exist:
    - read the plain-text file pointed to by `ZTNCUI_ADMIN_PASSWORD_FILE` first;
@@ -409,7 +431,7 @@ Docker:
 docker logs ztncui-fix | grep 'Initial password'
 ```
 
-### Creating a secret file (recommended)
+### Creating a secret file (optional)
 
 `ZTNCUI_ADMIN_PASSWORD_FILE` points to a **plain-text password file**, not a binary key. Its content is the password itself; a trailing newline is fine.
 
@@ -489,18 +511,39 @@ All parameters are environment variables: put them in `src/.env` for both source
 | `SESSION_COOKIE_SECURE` | unset | Set to `yes` to add `Secure` to cookies; requires HTTPS |
 | `TRUST_PROXY` | unset | Enable `trust proxy` behind a reverse proxy, needed with `Secure` cookies |
 
-Example `src/.env`:
+Example `src/.env` (source / pm2 installs; the Docker image already places the data directory on the volume, so `ZTNCUI_DATA_DIR` is optional there):
 
 ```dotenv
+# Single data directory: password store, sessions, TLS certs, session secret
+# and member notes all live here. Keep it outside the source tree so an
+# upgrade only needs to preserve this directory. Defaults to src/etc.
+ZTNCUI_DATA_DIR=/srv/ztncui-data
+
 ZT_TOKEN=<contents of authtoken.secret>
 ZT_ADDR=127.0.0.1:9993
 HTTP_PORT=3000
 NODE_ENV=production
-ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
-ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
-SESSION_SECRET=<value from openssl rand -hex 32>
-SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+
+# Recommended: leave unset. A random initial password is generated at startup,
+# printed to the console, and must be changed on first login.
+# To set your own initial password, uncomment the line below and point it to a
+# plain-text password file (not the password store; mode 0600 recommended):
+# ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
+
+# The password store and session directory are derived from ZTNCUI_DATA_DIR:
+#   $ZTNCUI_DATA_DIR/passwd, $ZTNCUI_DATA_DIR/sessions
+# Override them explicitly only when needed:
+# ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
+# SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+
+# When left unset, a secret is generated once and saved to
+# $ZTNCUI_DATA_DIR/session.secret, so restarts keep sessions valid
+# SESSION_SECRET=<value from openssl rand -hex 32>
 SESSION_TTL=86400
+
+# Optional: relocate the bootstrap env file; $ZTNCUI_DATA_DIR/.env is also read
+# ZTNCUI_ENV_FILE=/etc/ztncui/bootstrap.env
+
 # Only enable these behind HTTPS / a reverse proxy
 # SESSION_COOKIE_SECURE=yes
 # TRUST_PROXY=1
@@ -526,27 +569,32 @@ See the Docker section below for a container example.
 
 ## Docker
 
-The repository root contains a multi-stage `Dockerfile` that installs both zerotier-one and ztncui:
+The repository root contains a multi-stage `Dockerfile` (installing both zerotier-one and ztncui) and a `docker-compose.yml`. **Compose is recommended** — it already configures host networking, the required capabilities, the TUN device and a named volume:
+
+```shell
+docker compose up -d
+# After changing the Dockerfile or local sources:
+docker compose up -d --build
+```
+
+Equivalent `docker run` example (host networking lets the controller communicate over UDP 9993; the volume name matches Compose and the backup section):
 
 ```shell
 docker build -t ztncui-fix .
-```
-
-Linux example (host networking is recommended so the controller can communicate over UDP 9993):
-
-```shell
 docker run -d --name ztncui-fix \
   --restart unless-stopped \
   --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --device /dev/net/tun \
-  -v ztncui-zt:/var/lib/zerotier-one \
+  -v ztncui-data:/var/lib/zerotier-one \
   ztncui-fix
 ```
 
 If host networking is not used, map at least `-p 3000:3000 -p 9993:9993/udp` and add `-e HTTP_ALL_INTERFACES=yes` (the image listens on `localhost` only by default). Always terminate HTTPS at a reverse proxy before exposing it.
 
-The image contains **no default password**. On first start a random password is written to `/var/lib/zerotier-one/ztncui-passwd` on the mounted volume; read it once with `docker logs ztncui-fix`. It survives container recreation. You can also mount a secret file and pass `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`. The first login forces a password change. Session files are written to `ztncui-sessions/` on the mounted volume and survive container recreation. Identity files and `authtoken.secret` are likewise generated only in the mounted volume; the image contains no identity keys.
+The image contains **no default password**. Leaving the initial-password variables unset is recommended: a random password is generated and printed to the console on first start; read it once with `docker logs ztncui-fix | grep 'Initial password'`. The first login forces a change, and container recreation keeps reading the same file. To set your own initial password, mount a plain-text secret file read-only and pass `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password` (see above).
+
+All mutable state lives on the same mounted volume: the password store `ztncui-passwd`, sessions in `ztncui-sessions/`, and TLS certs plus the session secret in `ztncui-data/`. Container recreation keeps reading the same data. Identity files and `authtoken.secret` are likewise generated only in the mounted volume; the image contains no identity keys.
 
 ## Upgrades and preserving configuration
 
