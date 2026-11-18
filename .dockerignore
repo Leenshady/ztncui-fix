@@ -3,8 +3,11 @@
 .workbuddy
 src/node_modules
 src/etc/passwd
+src/etc/session.secret
 src/etc/sessions
+src/etc/storage
 src/etc/tls/*.pem
+src/etc/.env
 src/.env
 *.deb
 *.tar.gz

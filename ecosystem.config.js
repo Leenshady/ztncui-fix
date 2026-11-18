@@ -8,8 +8,8 @@
  *   HTTP_ALL_INTERFACES，而 dotenv 原本只在 app.js 里调用，且默认从
  *   进程 cwd 查找 .env。pm2 的工作目录往往不是 src/，导致 .env 根本
  *   没被加载、变量缺失（典型症状：HTTP_ALL_INTERFACES 不生效）。
- *   这里用绝对路径提前加载 src/.env，并把所有变量显式注入 pm2 的 env，
- *   保证 bin/www 第一行就能读到正确的值。
+ *   这里让应用自己的 config 模块加载 .env（引导文件 + 数据目录），再把
+ *   所有变量显式注入 pm2 的 env，保证 bin/www 第一行就能读到正确的值。
  *
  * 用法（二选一或混用）：
  *   1) 把配置写进 src/.env（见 README「启动参数」），然后：
@@ -20,21 +20,20 @@
  * 注意：不要把明文密码写进本文件（它会进 git）。用
  * ZTNCUI_ADMIN_PASSWORD_FILE 指向一个 0600 权限的密钥文件，或写进
  * 不入库的 src/.env。
+ *
+ * 升级保留配置：把 ZTNCUI_DATA_DIR 指向源码树之外的目录后，密码库、
+ * session、TLS 证书、session.secret 都会集中到那里；升级只需保留该目录。
  */
 
 const path = require('path');
 
 const ROOT = __dirname;
 const SRC = path.join(ROOT, 'src');
-const ENV_FILE = path.join(SRC, '.env');
 
-// dotenv 只装在 src/node_modules，用绝对路径 require，避免 pm2 从其它
-// 目录启动时找不到包。src/.env 不存在时 dotenv 会静默跳过。
-try {
-  require(path.join(SRC, 'node_modules', 'dotenv')).config({ path: ENV_FILE });
-} catch (err) {
-  console.warn('[ztncui] 无法加载 .env（' + ENV_FILE + '）：' + err.message);
-}
+// 应用的 config 模块按「引导 .env → 数据目录 .env」两阶段加载，真实
+// 环境变量（shell / pm2 / Docker）优先。require 一次，确保下面构造注入
+// 环境时所有值都已就位。
+require(path.join(SRC, 'lib', 'config'));
 
 // ztncui 识别的全部环境变量。只注入有真实值的项；空值交给应用使用内置默认值，
 // 避免空字符串意外覆盖默认端口、或触发密码初始化的分支。
@@ -49,6 +48,8 @@ const KEYS = [
   'ZTNCUI_ADMIN_PASSWORD',
   'ZTNCUI_ADMIN_PASSWORD_FILE',
   'ZTNCUI_PASSWD_FILE',
+  'ZTNCUI_DATA_DIR',
+  'ZTNCUI_ENV_FILE',
   'SESSION_SECRET',
   'SESSION_DIR',
   'SESSION_TTL',
@@ -68,8 +69,8 @@ module.exports = {
   apps: [{
     name: 'ztncui',
     script: path.join(SRC, 'bin', 'www'),
-    // etc/passwd、etc/sessions、etc/tls 以及 app.js 里的 dotenv.config()
-    // 都依赖 cwd=src；这里显式固定，避免 pm2 从仓库根目录启动时路径错位。
+    // 默认数据目录在 src/etc，依赖 cwd=src；外置 ZTNCUI_DATA_DIR 后不再
+    // 依赖相对路径，但固定 cwd 仍然安全。
     cwd: SRC,
     env: env
   }]

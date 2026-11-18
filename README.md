@@ -63,7 +63,7 @@ npm start
 
 本分支**不再提供固定默认口令**，`etc/default.passwd` 仅作旧版参考，请不要再复制到 `etc/passwd`。
 
-密码文件是在**首次有请求需要读取用户库**时创建的（通常是第一次提交登录表单），不是 `npm start` 完成的瞬间。规则如下：
+密码文件在**应用启动时**创建，随机密码会立即打印到控制台，无需先尝试登录。规则如下：
 
 1. 若 `ZTNCUI_PASSWD_FILE`（默认 `etc/passwd`）不存在：
    - 优先读取 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向的纯文本文件；
@@ -143,7 +143,7 @@ Docker 中只读挂载：
 ### 密码丢失或重置
 
 - 已能登录：在 Web 界面的 `Users → Set password` 修改。
-- 尚未初始化：删除密码库后重启并触发一次登录，会重新生成一组密码：
+- 尚未初始化：删除密码库后重启即可，启动时会重新生成一组密码：
 
 ```shell
 rm /path/to/ztncui-passwd
@@ -155,7 +155,7 @@ pm2 logs ztncui --lines 200
 
 ## 启动参数
 
-所有参数都通过环境变量传入：源码运行写在 `src/.env`，pm2 写在 `ecosystem.config.js` 的 `env`，Docker 使用 `-e` 或 `--env-file`。
+所有参数都通过环境变量传入：源码运行和 pm2 统一写在 `src/.env`，Docker 使用 `-e` 或 `--env-file`。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -168,8 +168,10 @@ pm2 logs ztncui --lines 200
 | `NODE_ENV` | 未设置 | 生产环境设为 `production` |
 | `ZTNCUI_ADMIN_PASSWORD` | 未设置 | 初始 admin 密码；与下一项二选一 |
 | `ZTNCUI_ADMIN_PASSWORD_FILE` | 未设置 | 初始密码文件路径，优先级高于上一项 |
-| `ZTNCUI_PASSWD_FILE` | `etc/passwd` | 用户密码库路径，Docker 镜像中指向挂载卷 |
-| `SESSION_SECRET` | 每次启动随机生成 | session 签名密钥；固定后重启仍可保持登录态 |
+| `ZTNCUI_PASSWD_FILE` | `$ZTNCUI_DATA_DIR/passwd`（默认 `etc/passwd`） | 用户密码库路径；显式设置时优先级高于数据目录，Docker 镜像中指向挂载卷 |
+| `ZTNCUI_DATA_DIR` | `src/etc` | 统一数据目录：密码库、session、TLS 证书、签名密钥的根目录；指向源码树外即可在升级中保留 |
+| `ZTNCUI_ENV_FILE` | `src/.env` | 引导 env 文件；此外还会读取数据目录内的 `.env`，真实环境变量始终优先 |
+| `SESSION_SECRET` | 保存到 `$ZTNCUI_DATA_DIR/session.secret` | session 签名密钥；未显式设置时自动生成一次并持久化，重启/升级不掉登录 |
 | `SESSION_DIR` | `etc/sessions` | 文件型 session 存储目录；Docker 镜像中指向挂载卷 |
 | `SESSION_TTL` | `86400` | session 有效期（秒），同时作为 cookie `maxAge` 与过期文件清理周期 |
 | `SESSION_COOKIE_SECURE` | 未设置 | 设为 `yes` 时给 cookie 加 `Secure`；必须已启用 HTTPS |
@@ -192,23 +194,21 @@ SESSION_TTL=86400
 # TRUST_PROXY=1
 ```
 
-pm2 请使用仓库根目录自带的 `ecosystem.config.js`，它已配置好全部变量、固定的工作目录和正确的启动路径：
+pm2 请使用仓库根目录自带的 `ecosystem.config.js`。它会自动加载 `src/.env` 并注入全部变量，日常只需维护一个 `.env` 文件：
 
 ```shell
-# 方式一：把变量写进 src/.env（不会入库），配置见上文
+# 变量写进 src/.env（已在 .gitignore，不会入库），配置见上文
 pm2 start ecosystem.config.js && pm2 save
 
-# 方式二：启动前用 shell 环境变量注入（优先级高于 src/.env）
-HTTP_ALL_INTERFACES=yes HTTP_PORT=3000 \
-  ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret \
-  pm2 start ecosystem.config.js && pm2 save
-
-pm2 logs ztncui --lines 200
+# 修改 src/.env 后，必须用配置文件名重启才会重新读取环境变量
+pm2 restart ecosystem.config.js
 ```
 
-**为什么必须用这个文件**：`bin/www` 在进程启动的第一行就读取 `HTTP_PORT`、`HTTP_ALL_INTERFACES` 等变量，而 `dotenv` 原本只在 `app.js` 里调用、且从当前工作目录找 `.env`。pm2 的工作目录通常不是 `src/`，导致 `.env` 根本没被加载，`HTTP_ALL_INTERFACES` 等设置静默失效。`ecosystem.config.js` 用绝对路径提前加载 `src/.env` 并显式注入所有变量，同时把工作目录固定在 `src`（`etc/passwd`、`etc/sessions`、`etc/tls` 都依赖这个相对路径），从任何目录启动都能生效。
+`pm2 restart ztncui`（按进程名重启）**不会**重读 `.env`；改了配置请用上面的 `pm2 restart ecosystem.config.js`。如需临时覆盖某个变量，才用 shell 前缀，例如 `HTTP_PORT=4000 pm2 start ecosystem.config.js`。
 
-敏感信息不要写进 `ecosystem.config.js`（它会进 git），请用 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向密钥文件或写入 `src/.env`。
+`ecosystem.config.js` 是必需的：`bin/www` 在启动第一行就读取 `HTTP_PORT`、`HTTP_ALL_INTERFACES` 等变量，而 `dotenv` 原本只在 `app.js` 里调用、且从当前工作目录找 `.env`，pm2 的工作目录通常不是 `src/`，导致设置静默失效。该文件用绝对路径提前加载 `src/.env`、显式注入所有变量，并把工作目录固定在 `src`（`etc/passwd`、`etc/sessions`、`etc/tls` 都依赖这个相对路径）。
+
+敏感信息请用 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向密钥文件或写入 `src/.env`，不要写进会进 git 的 `ecosystem.config.js`。
 
 Docker 示例见下一节。
 
@@ -235,6 +235,74 @@ docker run -d --name ztncui-fix \
 如不使用 host 网络，请至少映射 `-p 3000:3000 -p 9993:9993/udp`，并额外加 `-e HTTP_ALL_INTERFACES=yes`（镜像默认只监听 `localhost`）。对外提供访问时请务必经由 HTTPS 反向代理。
 
 镜像**不包含默认口令**。首次启动会在挂载卷的 `/var/lib/zerotier-one/ztncui-passwd` 生成随机密码，可用 `docker logs ztncui-fix` 查看一次；容器重建后仍读取同一文件。也可挂载密钥文件后传入 `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`。首次登录会强制修改密码。session 文件写入挂载卷的 `ztncui-sessions/` 目录，不会随容器重建丢失。identity 与 `authtoken.secret` 同样只生成在挂载卷中，镜像本身不含任何身份密钥。
+
+## 升级与配置保留
+
+可变状态（账号、session、证书、启动参数）默认位于源码树的 `src/etc/`，升级时若替换整个 `src/` 目录就会丢失。本分支把它们收敛到 `ZTNCUI_DATA_DIR` 指定的**单一数据目录**，默认值仍是 `src/etc`，因此现有部署无需改动。
+
+| 状态 | 位置 | 覆盖方式 |
+|---|---|---|
+| 管理员密码库 | `$DATA_DIR/passwd` | `ZTNCUI_PASSWD_FILE` |
+| 文件型 session | `$DATA_DIR/sessions/` | `SESSION_DIR` |
+| session 签名密钥 | `$DATA_DIR/session.secret` | `SESSION_SECRET`（设置后不写文件） |
+| TLS 证书 | `$DATA_DIR/tls/fullchain.pem`、`privkey.pem` | — |
+| 成员备注（Member name） | `$DATA_DIR/storage/` | — |
+| 启动配置 | `src/.env`（引导）+ `$DATA_DIR/.env` | `ZTNCUI_ENV_FILE` |
+
+成员备注同时写入 ZeroTier 控制器（1.14+）和 `$DATA_DIR/storage/`；旧版 `src/etc/storage/` 中的备注会在首次启动时自动迁移到数据目录。
+
+配置模块先读引导文件拿到 `ZTNCUI_DATA_DIR`，再读数据目录里的 `.env`；dotenv 不会覆盖 shell、pm2 或 Docker 已传入的变量。
+
+### 源码 / pm2 升级
+
+```shell
+cd /path/to/ztncui-fix
+git pull
+cd src && npm install --omit=dev && cd ..
+pm2 restart ecosystem.config.js
+```
+
+只要不执行 `git clean -fdx`、不删除 `src/etc/` 与 `src/.env`，账号和配置都会保留。推荐把数据目录外置，并把 `.env` 一并放进去：
+
+```dotenv
+ZTNCUI_DATA_DIR=/srv/ztncui-data
+```
+
+```shell
+sudo install -d -m 700 /srv/ztncui-data
+cp src/.env /srv/ztncui-data/.env
+```
+
+此后升级只需保留 `/srv/ztncui-data` 一个目录。该目录含凭据，权限应保持 `0700`，其中文件为 `0600`。
+
+### Docker 升级
+
+仓库根目录的 `docker-compose.yml` 用一个命名卷保存全部可变状态：
+
+```shell
+docker compose pull && docker compose up -d
+# 修改了 Dockerfile 或本地源码时：
+docker compose up -d --build
+```
+
+**绝不要**执行 `docker compose down -v` 或 `docker volume rm ztncui-data`，那会删除密码库、session 以及 ZeroTier 身份文件。旧镜像创建的卷同样兼容：容器仍显式使用 `ztncui-passwd` 与 `ztncui-sessions` 原路径，TLS 证书和可选的 `.env` 放在卷内 `ztncui-data/` 子目录。若旧容器启用了 HTTPS，升级前先把 `etc/tls/*.pem` 复制到卷内 `ztncui-data/tls/`，新镜像会从那里读取证书。旧镜像的 `etc/storage/`（成员备注）若未挂载到卷，用 `docker cp ztncui-fix:/app/src/etc/storage ./storage-backup` 导出，再把内容放进卷内 `ztncui-data/storage/`。
+
+### 备份与恢复
+
+源码部署：
+
+```shell
+tar czf ztncui-backup-$(date +%F).tar.gz -C /path/to/ztncui-fix/src etc .env
+tar xzf ztncui-backup-2026-11-18.tar.gz -C /path/to/ztncui-fix/src
+```
+
+Docker 命名卷：
+
+```shell
+docker run --rm -v ztncui-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/ztncui-backup-$(date +%F).tar.gz -C /data .
+# 恢复时把解包目标改回 /data
+```
 
 ## 许可证
 
@@ -307,7 +375,7 @@ See the next two sections for how the initial password is generated and viewed, 
 
 This fork **does not ship a fixed default password**. `etc/default.passwd` is kept only as a legacy reference; do not copy it to `etc/passwd`.
 
-The password file is created when a request first needs the user store (normally the first login form submission), not necessarily the moment `npm start` finishes:
+The password file is created **at application startup** and a generated password is printed to the console immediately, with no login attempt required:
 
 1. If `ZTNCUI_PASSWD_FILE` (default `etc/passwd`) does not exist:
    - read the plain-text file pointed to by `ZTNCUI_ADMIN_PASSWORD_FILE` first;
@@ -387,7 +455,7 @@ Mount it read-only in Docker:
 ### Lost password / reset
 
 - If you can still log in: change it under `Users → Set password` in the web UI.
-- If not yet initialized: delete the password store, restart, and trigger one login to generate a new password:
+- If not yet initialized: delete the password store and restart; a new password is generated at startup:
 
 ```shell
 rm /path/to/ztncui-passwd
@@ -399,7 +467,7 @@ pm2 logs ztncui --lines 200
 
 ## Startup parameters
 
-All parameters are environment variables: put them in `src/.env` for source installs, in the `env` block of `ecosystem.config.js` for pm2, or pass them with `-e` / `--env-file` for Docker.
+All parameters are environment variables: put them in `src/.env` for both source installs and pm2, or pass them with `-e` / `--env-file` for Docker.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -412,8 +480,10 @@ All parameters are environment variables: put them in `src/.env` for source inst
 | `NODE_ENV` | unset | Set to `production` for deployments |
 | `ZTNCUI_ADMIN_PASSWORD` | unset | Initial admin password; choose one of this or the next variable |
 | `ZTNCUI_ADMIN_PASSWORD_FILE` | unset | Path to the initial password file; takes precedence |
-| `ZTNCUI_PASSWD_FILE` | `etc/passwd` | User password store; points to the mounted volume in Docker |
-| `SESSION_SECRET` | random per start | Session signing secret; set it to keep sessions across restarts |
+| `ZTNCUI_PASSWD_FILE` | `$ZTNCUI_DATA_DIR/passwd` (default `etc/passwd`) | User password store; wins over the data directory when set, points to the mounted volume in Docker |
+| `ZTNCUI_DATA_DIR` | `src/etc` | Single data directory for the password store, sessions, TLS certs and session secret; point it outside the source tree to survive upgrades |
+| `ZTNCUI_ENV_FILE` | `src/.env` | Bootstrap env file; a `.env` inside the data directory is also read, real env vars always win |
+| `SESSION_SECRET` | saved to `$ZTNCUI_DATA_DIR/session.secret` | Session signing secret; when unset it is generated once and persisted, so restarts/upgrades keep sessions |
 | `SESSION_DIR` | `etc/sessions` | File-backed session directory; points to the mounted volume in Docker |
 | `SESSION_TTL` | `86400` | Session lifetime in seconds; also used as cookie `maxAge` and file reaper interval |
 | `SESSION_COOKIE_SECURE` | unset | Set to `yes` to add `Secure` to cookies; requires HTTPS |
@@ -436,21 +506,19 @@ SESSION_TTL=86400
 # TRUST_PROXY=1
 ```
 
-For pm2, use the `ecosystem.config.js` shipped at the repository root. It already defines all variables, a fixed working directory, and the correct entry point:
+For pm2, use the `ecosystem.config.js` shipped at the repository root. It loads `src/.env` and injects every variable, so day to day you only maintain a single `.env` file:
 
 ```shell
-# Option 1: put variables in src/.env (not committed); see the table above
+# Put variables in src/.env (gitignored); see the table above
 pm2 start ecosystem.config.js && pm2 save
 
-# Option 2: inject variables from the shell before starting (takes precedence over src/.env)
-HTTP_ALL_INTERFACES=yes HTTP_PORT=3000 \
-  ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret \
-  pm2 start ecosystem.config.js && pm2 save
-
-pm2 logs ztncui --lines 200
+# After editing src/.env, restart by config file so variables are re-read
+pm2 restart ecosystem.config.js
 ```
 
-**Why this file is required:** `bin/www` reads `HTTP_PORT`, `HTTP_ALL_INTERFACES`, and friends on the very first lines of the process, whereas `dotenv` was originally called only inside `app.js` and looks for `.env` relative to the current working directory. pm2 usually runs from a directory other than `src/`, so `.env` was never loaded and settings such as `HTTP_ALL_INTERFACES` silently failed. `ecosystem.config.js` loads `src/.env` via an absolute path up front, injects every variable explicitly, and pins the working directory to `src` (`etc/passwd`, `etc/sessions`, `etc/tls` all depend on that relative path), so it works no matter where you launch pm2 from.
+`pm2 restart ztncui` (by process name) does **not** re-read `.env`; use `pm2 restart ecosystem.config.js` above after any change. Only use a shell prefix for a one-off override, e.g. `HTTP_PORT=4000 pm2 start ecosystem.config.js`.
+
+**Why this file is required:** `bin/www` reads `HTTP_PORT`, `HTTP_ALL_INTERFACES`, and friends on the very first lines of the process, whereas `dotenv` was originally called only inside `app.js` and looks for `.env` relative to the current working directory. pm2 usually runs from a directory other than `src/`, so settings such as `HTTP_ALL_INTERFACES` silently failed. `ecosystem.config.js` loads `src/.env` via an absolute path up front, injects every variable explicitly, and pins the working directory to `src` (`etc/passwd`, `etc/sessions`, `etc/tls` all depend on that relative path).
 
 Never put plain-text passwords in `ecosystem.config.js` (it is committed to git). Use `ZTNCUI_ADMIN_PASSWORD_FILE` pointing to a secret file, or write them into `src/.env`.
 
@@ -479,6 +547,74 @@ docker run -d --name ztncui-fix \
 If host networking is not used, map at least `-p 3000:3000 -p 9993:9993/udp` and add `-e HTTP_ALL_INTERFACES=yes` (the image listens on `localhost` only by default). Always terminate HTTPS at a reverse proxy before exposing it.
 
 The image contains **no default password**. On first start a random password is written to `/var/lib/zerotier-one/ztncui-passwd` on the mounted volume; read it once with `docker logs ztncui-fix`. It survives container recreation. You can also mount a secret file and pass `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`. The first login forces a password change. Session files are written to `ztncui-sessions/` on the mounted volume and survive container recreation. Identity files and `authtoken.secret` are likewise generated only in the mounted volume; the image contains no identity keys.
+
+## Upgrades and preserving configuration
+
+Mutable state (accounts, sessions, TLS certs, startup parameters) lives in `src/etc/` by default, so replacing the whole `src/` directory during an upgrade loses it. This fork consolidates it into a **single data directory** selected by `ZTNCUI_DATA_DIR`, which still defaults to `src/etc` — existing installs need no changes.
+
+| State | Location | Overridden by |
+|---|---|---|
+| Admin password store | `$DATA_DIR/passwd` | `ZTNCUI_PASSWD_FILE` |
+| File-backed sessions | `$DATA_DIR/sessions/` | `SESSION_DIR` |
+| Session signing secret | `$DATA_DIR/session.secret` | `SESSION_SECRET` (no file written when set) |
+| TLS certificates | `$DATA_DIR/tls/fullchain.pem`, `privkey.pem` | — |
+| Member notes (Member name) | `$DATA_DIR/storage/` | — |
+| Startup config | `src/.env` (bootstrap) + `$DATA_DIR/.env` | `ZTNCUI_ENV_FILE` |
+
+Member names are written both to the ZeroTier controller (1.14+) and to `$DATA_DIR/storage/`; notes in the old `src/etc/storage/` are migrated automatically on first start.
+
+The config module reads the bootstrap file first to learn `ZTNCUI_DATA_DIR`, then loads the `.env` inside the data directory. dotenv never overwrites values already supplied by the shell, pm2 or Docker.
+
+### Upgrading a source / pm2 install
+
+```shell
+cd /path/to/ztncui-fix
+git pull
+cd src && npm install --omit=dev && cd ..
+pm2 restart ecosystem.config.js
+```
+
+As long as you avoid `git clean -fdx` and never delete `src/etc/` or `src/.env`, accounts and configuration are preserved. Moving the data directory outside the source tree is recommended; keep `.env` there too:
+
+```dotenv
+ZTNCUI_DATA_DIR=/srv/ztncui-data
+```
+
+```shell
+sudo install -d -m 700 /srv/ztncui-data
+cp src/.env /srv/ztncui-data/.env
+```
+
+After that, a single directory (`/srv/ztncui-data`) is all you need to keep across upgrades. It contains credentials: use mode `0700` for the directory and `0600` for its files.
+
+### Upgrading Docker
+
+The `docker-compose.yml` at the repository root keeps all mutable state in one named volume:
+
+```shell
+docker compose pull && docker compose up -d
+# after changing the Dockerfile or local sources:
+docker compose up -d --build
+```
+
+**Never** run `docker compose down -v` or `docker volume rm ztncui-data` — that deletes the password store, sessions and ZeroTier identity files. Volumes created by earlier images still work: the container keeps using the original `ztncui-passwd` and `ztncui-sessions` paths, while TLS certs and the optional `.env` go under `ztncui-data/` in the same volume. If the old container used HTTPS, copy `etc/tls/*.pem` into `ztncui-data/tls/` on the volume before upgrading — the new image reads certs from there. Member notes in an old image's `etc/storage/` are not on the volume: export them with `docker cp ztncui-fix:/app/src/etc/storage ./storage-backup` and place them under `ztncui-data/storage/` on the volume.
+
+### Backup and restore
+
+Source install:
+
+```shell
+tar czf ztncui-backup-$(date +%F).tar.gz -C /path/to/ztncui-fix/src etc .env
+tar xzf ztncui-backup-2026-11-18.tar.gz -C /path/to/ztncui-fix/src
+```
+
+Docker named volume:
+
+```shell
+docker run --rm -v ztncui-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/ztncui-backup-$(date +%F).tar.gz -C /data .
+# to restore, extract back into /data
+```
 
 ## License
 

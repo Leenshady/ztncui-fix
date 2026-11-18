@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 const session = require('express-session');
+const config = require('./config');
 
 const readFile = util.promisify(fs.readFile);
 const writeFile = util.promisify(fs.writeFile);
@@ -24,7 +25,7 @@ class FileSessionStore extends session.Store {
   constructor(options) {
     super();
     options = options || {};
-    this.dir = options.path || process.env.SESSION_DIR || 'etc/sessions';
+    this.dir = options.path || config.sessionDir;
     const ttlSeconds = Number(options.ttl || process.env.SESSION_TTL || 86400);
     this.ttlMs = (Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 86400) * 1000;
     this.reapIntervalMs = Number(options.reapIntervalMs || 3600000);

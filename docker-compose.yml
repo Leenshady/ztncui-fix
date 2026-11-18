@@ -1,0 +1,30 @@
+# Upgrade without losing configuration:
+#   docker compose pull && docker compose up -d
+# NEVER add `-v` to `docker compose down`: it deletes the volume below.
+#
+# All mutable state lives in that single volume:
+#   /var/lib/zerotier-one/ztncui-passwd            admin accounts
+#   /var/lib/zerotier-one/ztncui-sessions          sessions
+#   /var/lib/zerotier-one/ztncui-data/tls          TLS certificates
+#   /var/lib/zerotier-one/ztncui-data/session.secret
+#   /var/lib/zerotier-one/ztncui-data/.env         optional, see README
+services:
+  ztncui:
+    build: .
+    image: ztncui-fix:local
+    container_name: ztncui-fix
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun
+    volumes:
+      - ztncui-data:/var/lib/zerotier-one
+    # Optional: keep the env file on the host instead of on the volume.
+    # env_file:
+    #   - ./config/.env
+
+volumes:
+  ztncui-data:

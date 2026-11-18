@@ -8,10 +8,11 @@ const fs = require('fs');
 const crypto = require('crypto');
 const argon2 = require('argon2');
 const util = require('util');
+const config = require('../lib/config');
 
-// ZTNCUI_PASSWD_FILE lets deployments keep the password store outside the
-// application source tree (the Docker image puts it on the mounted ZT volume).
-const passwd_file = process.env.ZTNCUI_PASSWD_FILE || 'etc/passwd';
+// The store lives in the persistent data directory; an explicit
+// ZTNCUI_PASSWD_FILE still wins for backward compatibility.
+const passwd_file = config.passwdFile;
 const min_pass_len = 10;
 
 const readFile = util.promisify(fs.readFile);

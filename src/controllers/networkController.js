@@ -6,11 +6,17 @@
 
 const fs = require('fs');
 const ipaddr = require('ip-address');
+const path = require('path');
 const storage = require('node-persist');
 const zt = require('./zt');
 const util = require('util');
+const config = require('../lib/config');
 
-storage.initSync({dir: 'etc/storage'});
+// Member names are also kept locally for controllers that cannot store the
+// `name` field themselves. Keep that copy in the persistent data directory;
+// older src/etc/storage notes are migrated once on first start.
+require('../lib/migrateStorage')();
+storage.initSync({ dir: config.storageDir });
 
 // Dynamic res.render(req.params.object) must never be able to reach views
 // outside the small set the UI actually uses.
