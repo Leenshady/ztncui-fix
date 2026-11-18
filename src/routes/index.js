@@ -72,12 +72,13 @@ router.post('/login', async function(req, res) {
   await authenticate(req.body.username, req.body.password, function(err, user) {
     if (user) {
       req.session.regenerate(function() {
-        req.session.user = user;
+        // Keep only what the UI needs; never put the password hash in a session.
+        req.session.user = { name: user.name, pass_set: user.pass_set };
         req.session.success = 'Authenticated as ' + user.name;
         if (user.pass_set) {
           res.redirect(safeRedirect(req.query.redirect));
         } else {
-          res.redirect('/users/' + user.name + '/password');
+          res.redirect('/users/' + encodeURIComponent(user.name) + '/password');
         }
       });
     } else {

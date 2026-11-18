@@ -6,6 +6,7 @@
 
 require('dotenv').config();
 
+const crypto = require('crypto');
 const express = require('express');
 const path = require('path');
 const favicon = require('serve-favicon');
@@ -22,7 +23,9 @@ const zt_controller = require('./routes/zt_controller');
 
 const app = express();
 
-const session_secret = Math.random().toString(36).substring(2,12);
+// A stable secret can be supplied for multi-instance / restarted deployments.
+// Otherwise use a cryptographically strong random value, never Math.random().
+const session_secret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));

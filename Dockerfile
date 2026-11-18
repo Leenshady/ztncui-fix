@@ -19,8 +19,8 @@ FROM docker.io/node:20-bookworm-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
     ZT_ADDR=127.0.0.1:9993 \
-    HTTP_ALL_INTERFACES=yes \
-    HTTP_PORT=3000
+    HTTP_PORT=3000 \
+    ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
@@ -38,9 +38,10 @@ WORKDIR /app/src
 COPY src/ ./
 COPY --from=deps /app/src/node_modules ./node_modules
 
-RUN cp -n etc/default.passwd etc/passwd
+# No default password is baked into the image. On first start ztncui creates
+# a random admin password in ZTNCUI_PASSWD_FILE (the mounted ZT volume).
 
 VOLUME ["/var/lib/zerotier-one"]
 EXPOSE 3000 9993/udp
 
-CMD ["sh", "-c", "zerotier-one -d && exec node ./bin/www"]
+CMD ["sh", "-c", "mkdir -p /var/lib/zerotier-one && zerotier-one -d && exec node ./bin/www"]
