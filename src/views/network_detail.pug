@@ -61,19 +61,27 @@ block net_content
   a.btn.btn-primary(style="margin: 5px" href=(nwurl + '/v4AssignMode') role='button') IPv4 Assign Mode
   a.btn.btn-primary(style="margin: 5px" href=(nwurl + '/v6AssignMode') role='button') IPv6 Assign Mode
   a.btn.btn-primary(style="margin: 5px" href=(nwurl + '/dns') role='button') DNS
+  a.btn.btn-primary(style="margin: 5px" href=(nwurl + '/relays') role='button') Relays
 
   if (members !== undefined)
     script.
       $(function() {
         const url = "#{nwurl}/members";
+        function update(data) {
+          $.post(url, data).fail(function(xhr) {
+            const detail = xhr.responseJSON && xhr.responseJSON.error
+              ? ': ' + xhr.responseJSON.error : '';
+            window.alert('Failed to update member' + detail);
+          });
+        }
         $('.authCheck').on('click', function() {
-          $.post(url, {'id': this.value, 'auth': this.checked});
+          update({'id': this.value, 'auth': this.checked});
         });
         $('.bridgeCheck').on('click', function() {
-          $.post(url, {'id': this.value, 'activeBridge': this.checked});
+          update({'id': this.value, 'activeBridge': this.checked});
         });
         $('.text').on('change', function() {
-          $.post(url, {'id': this.name, 'name': this.value});
+          update({'id': this.name, 'name': this.value});
         });
       });
     h3#members Members (#{members.length})
@@ -121,7 +129,8 @@ block net_content
                 a(href=nwurl + '/member/' + member.id + '/ipAssignments')
                   | IP assignment
             td
-              if (peer && peer.latency != -1 && peer.versionMajor != -1)
+              //- A relayed peer has latency -1 but is still online (issues #82, #147)
+              if (peer && (peer.latency != -1 || peer.versionMajor != -1))
                 if (peer.latency != -1)
                   span(style='color: green;')
                     | ONLINE (v#{peer.version})

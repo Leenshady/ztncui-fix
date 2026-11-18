@@ -46,6 +46,9 @@ router.post('/network/:nwid/routes', restrict, networkController.routes);
 // POST request for dns
 router.post('/network/:nwid/dns', restrict, networkController.dns);
 
+// POST request for network relays (ZeroTier 1.16+)
+router.post('/network/:nwid/relays', restrict, networkController.relays);
+
 // POST request for private
 router.post('/network/:nwid/private', restrict, networkController.private);
 

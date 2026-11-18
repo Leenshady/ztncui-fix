@@ -10,6 +10,32 @@ const authenticate = auth.authenticate;
 const restrict = auth.restrict;
 const router = express.Router();
 
+// Only allow same-origin paths as post-login redirect targets.
+// Upstream PR #148 only blocked '//' and '://', which still allowed
+// backslash variants (/\evil.com) and non-http schemes.
+function safeRedirect(target) {
+  const fallback = '/controller';
+  if (typeof target !== 'string' || !target.trim()) {
+    return fallback;
+  }
+
+  target = target.trim();
+  if (!target.startsWith('/') || target.startsWith('//') ||
+      /[\\\u0000-\u001f]/.test(target)) {
+    return fallback;
+  }
+
+  try {
+    const parsed = new URL(target, 'http://ztncui.invalid');
+    if (parsed.origin !== 'http://ztncui.invalid') {
+      return fallback;
+    }
+    return parsed.pathname + parsed.search + parsed.hash;
+  } catch (err) {
+    return fallback;
+  }
+}
+
 /** Redirect logged user to controler page */
 function guest_only(req, res, next) {
   if (req.session.user) {
@@ -49,7 +75,7 @@ router.post('/login', async function(req, res) {
         req.session.user = user;
         req.session.success = 'Authenticated as ' + user.name;
         if (user.pass_set) {
-          res.redirect(req.query.redirect || '/controller');
+          res.redirect(safeRedirect(req.query.redirect));
         } else {
           res.redirect('/users/' + user.name + '/password');
         }

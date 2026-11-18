@@ -12,6 +12,36 @@ const util = require('util');
 
 storage.initSync({dir: 'etc/storage'});
 
+// ZeroTier 1.14+ can store a member name in the controller itself, while older
+// controllers cannot. Prefer the controller value so names set through either
+// ztncui or the ZeroTier API stay in sync (upstream issue #144).
+function displayName(storedName, member) {
+  if (member && typeof member.name === 'string' && member.name.trim()) {
+    return member.name;
+  }
+  return storedName || '';
+}
+
+// jQuery serializes unchecked checkboxes as the string "false", so a plain
+// truthiness check would silently skip de-authorization / bridge removal.
+function toBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  return /^(true|1)$/i.test(String(value).trim());
+}
+
+// ZeroTier 1.16 network relays are stored as a list of 10-hex-digit ZT addresses.
+function parseRelayAddresses(value) {
+  const addresses = [...new Set(
+    String(value == null ? '' : value)
+      .split(/[\s,;]+/)
+      .map(address => address.trim().toLowerCase())
+      .filter(Boolean)
+  )];
+  const invalid = addresses.filter(address => !/^[0-9a-f]{10}$/.test(address));
+  return {relays: addresses, invalid};
+}
+
 async function get_network_with_members(nwid) {
   const [network, peers, members] = await Promise.all([
     zt.network_detail(nwid),
@@ -37,7 +67,7 @@ async function get_network_with_members(nwid) {
             ]))
         );
       }).then(results => results.map(([member, name]) => {
-        member.name = name || '';
+        member.name = displayName(name, member);
         return member;
       }))
   ]);
@@ -54,7 +84,7 @@ async function get_network_member(nwid, memberid) {
     zt.peer(memberid),
     storage.getItem(memberid)
   ]);
-  member.name = name || '';
+  member.name = displayName(name, member);
   member.peer = peer;
   return {network, member};
 }
@@ -83,7 +113,7 @@ exports.network_list = async function(req, res) {
     }
 
   try {
-    networks = await zt.network_list();
+    const networks = await zt.network_list();
     res.render('networks', {title: 'Networks on this controller', navigate: navigate, networks: networks});
   } catch (err) {
     res.render('networks', {title: 'Networks on this controller', navigate: navigate, error: 'Error retrieving list of networks on this controller: ' + err});
@@ -497,6 +527,36 @@ exports.dns = async function (req, res) {
   }
 }
 
+// relays POST (ZeroTier 1.16+ network-specific relay nodes)
+exports.relays = async function (req, res) {
+  const navigate = {
+    active: 'networks',
+    whence: ''
+  };
+
+  const parsed = parseRelayAddresses(req.body.relays);
+  const errors = parsed.invalid.length
+    ? [{
+        msg: 'Invalid ZeroTier address(es): ' + parsed.invalid.join(', ') +
+             '. Each relay must be a 10-character hexadecimal address.'
+      }]
+    : null;
+
+  try {
+    const network = errors
+      ? await zt.network_detail(req.params.nwid)
+      : await zt.network_object(req.params.nwid, {relays: parsed.relays});
+
+    navigate.whence = '/controller/network/' + network.nwid;
+    res.render('relays', {title: 'relays', navigate: navigate,
+                          network: network, errors: errors});
+  } catch (err) {
+    res.render('relays', {title: 'relays', navigate: navigate,
+                          error: 'Error updating relays for network ' +
+                                 req.params.nwid + ': ' + err});
+  }
+}
+
 // Display detail page for specific member
 exports.member_detail = async function(req, res) {
   const navigate =
@@ -628,76 +688,62 @@ exports.easy_post = async function(req, res) {
 
 // Easy members auth POST
 exports.members = async function(req, res) {
-  const navigate =
-    {
-      active: 'networks',
-      whence: '/controller/networks'
-    }
-
-  let errors = null;
-
-  if (req.method === 'POST') {
-
-    req.checkBody('id', 'Member ID is required').notEmpty();
-    req.sanitize('id').trim();
-    req.sanitize('id').escape();
-
-    if (req.body.auth) {
-      req.checkBody('auth', 'Authorization state must be boolean').isBoolean();
-      req.sanitize('auth').trim();
-      req.sanitize('auth').escape();
-
-      errors = req.validationErrors();
-
-      if (!errors) {
-        const auth =
-          {
-            authorized: req.body.auth
-          };
-
-        try {
-          const mem = await zt.member_object(req.params.nwid, req.body.id, auth);
-        } catch (err) {
-          throw err;
-        }
-      }
-    } else if (req.body.activeBridge) {
-      req.checkBody('activeBridge', 'activeBridge state must be boolean').isBoolean();
-      req.sanitize('activeBridge').trim();
-      req.sanitize('activeBridge').escape();
-
-      errors = req.validationErrors();
-
-      if (!errors) {
-        const activeBridge =
-          {
-            activeBridge: req.body.activeBridge
-          };
-
-        try {
-          const mem = await zt.member_object(req.params.nwid, req.body.id, activeBridge);
-        } catch (err) {
-          throw err;
-        }
-      }
-    } else if (req.body.name) {
-      req.sanitize('name').trim();
-      req.sanitize('name').escape();
-
-      errors = req.validationErrors();
-
-      if (!errors) {
-        try {
-          const ret = await storage.setItem(req.body.id, req.body.name);
-        } catch (err) {
-          throw err;
-        }
-      }
-    }
-  } else { // GET
-    res.redirect("/controller/network/" + req.params.nwid + "#members");
+  if (req.method !== 'POST') {
+    return res.redirect('/controller/network/' + req.params.nwid + '#members');
   }
-}
+
+  req.checkBody('id', 'Member ID is required').notEmpty();
+  req.sanitize('id').trim();
+  req.sanitize('id').escape();
+
+  // Check for undefined rather than truthiness: the UI sends "false" for an
+  // unchecked box, and that update must not be skipped (issues #140, #146).
+  if (req.body.auth !== undefined) {
+    req.checkBody('auth', 'Authorization state must be boolean').isBoolean();
+  }
+  if (req.body.activeBridge !== undefined) {
+    req.checkBody('activeBridge', 'activeBridge state must be boolean').isBoolean();
+  }
+  if (req.body.name !== undefined) {
+    req.sanitize('name').trim();
+    req.sanitize('name').escape();
+  }
+
+  const errors = req.validationErrors();
+  if (errors) {
+    return res.status(400).json({success: false, errors: errors});
+  }
+
+  const id = req.body.id;
+  try {
+    if (req.body.auth !== undefined) {
+      await zt.member_object(req.params.nwid, id,
+                             {authorized: toBoolean(req.body.auth)});
+    }
+    if (req.body.activeBridge !== undefined) {
+      await zt.member_object(req.params.nwid, id,
+                             {activeBridge: toBoolean(req.body.activeBridge)});
+    }
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name).trim();
+      await storage.setItem(id, name);
+      // Keep the controller copy in sync when the ZT version supports it.
+      // Older releases ignore/reject the field; the local name still works.
+      try {
+        await zt.member_object(req.params.nwid, id, {name: name});
+      } catch (err) {
+        console.error('Controller rejected member name for ' + id + ': ' + err);
+      }
+    }
+
+    // The page uses $.post() without callbacks. Without a response the browser
+    // keeps the request pending forever (upstream issues #140 and #146).
+    return res.status(200).json({success: true});
+  } catch (err) {
+    console.error('Error updating member ' + id + ': ' + err);
+    return res.status(500).json({success: false, error: String(err)});
+  }
+};
 
 // Member delete GET or POST
 exports.member_delete = async function(req, res) {
@@ -720,7 +766,7 @@ exports.member_delete = async function(req, res) {
       member = await zt.member_detail(req.params.nwid, req.params.id);
       name = await storage.getItem(member.id);
     }
-    member.name = name || '';
+    member.name = displayName(name, member);
 
     navigate.whence = '/controller/network/' + network.nwid;
     res.render('member_delete', {title: 'Delete member from ' + network.name,
@@ -744,7 +790,7 @@ exports.delete_ip = async function(req, res) {
     const network = await zt.network_detail(req.params.nwid);
     let member = await zt.member_detail(req.params.nwid, req.params.id);
     navigate.whence = '/controller/network/' + network.nwid;
-    member.name = await storage.getItem(member.id) | '';
+    member.name = displayName(await storage.getItem(member.id), member);
     if (req.params.index) {
       member = await zt.ipAssignmentDelete(network.nwid, member.id,
                                                               req.params.index);
@@ -808,7 +854,7 @@ exports.assign_ip = async function(req, res) {
       member = await zt.ipAssignmentAdd(network.nwid, member.id, ipAssignment);
     }
 
-    member.name = await storage.getItem(member.id) | '';
+    member.name = displayName(await storage.getItem(member.id), member);
 
     res.render('ipAssignments', {title: 'ipAssignments', navigate: navigate,
                   ipAssignment: ipAssignment, network: network, member: member,

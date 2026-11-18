@@ -1,0 +1,48 @@
+//-
+  ztncui - ZeroTier network controller UI
+  Maintenance fork - see README.md
+  Licensed under GPLv3 - see LICENSE for details.
+
+extends network_layout
+
+block net_content
+  - const relays = Array.isArray(network.relays) ? network.relays : [];
+
+  if relays.length > 0
+    .row
+      .col-sm-12
+        b Configured relays:
+        ul
+          each relay in relays
+            li= relay
+  else
+    .row
+      .col-sm-12
+        b No relays configured on this network.
+
+  .row
+    .col-sm-12
+      p.text-muted
+        | Network relays are supported by ZeroTier 1.16+. Older controllers will ignore this setting.
+        | Enter one 10-character ZeroTier address per line.
+
+  form(method='POST' action='')
+    .form-group.row
+      .col-sm-12
+        label(for='relays') Relay addresses:
+      .col-sm-12
+        textarea#relays.form-control(name='relays' rows='5' placeholder='0123456789')
+          = relays.join('\n')
+
+    .form-group.row
+      .col-sm-12
+        button.btn.btn-primary(type='submit') Submit
+        = ' '
+        a.btn.btn-default(href=('/controller/network/' + network.nwid) name='cancel' role='button') Cancel
+
+  if errors
+    .row
+      .col-sm-12
+        ul
+          for err in errors
+            li!= err.msg
