@@ -192,31 +192,23 @@ SESSION_TTL=86400
 # TRUST_PROXY=1
 ```
 
-示例：pm2 `ecosystem.config.js`
-
-```js
-module.exports = {
-  apps: [{
-    name: 'ztncui',
-    script: './src/bin/www',
-    env: {
-      NODE_ENV: 'production',
-      HTTP_PORT: '3000',
-      ZTNCUI_ADMIN_PASSWORD_FILE: '/etc/ztncui/admin_secret',
-      ZTNCUI_PASSWD_FILE: '/var/lib/zerotier-one/ztncui-passwd',
-      SESSION_SECRET: '<long-random-string>',
-      SESSION_DIR: '/var/lib/zerotier-one/ztncui-sessions',
-      SESSION_TTL: '86400'
-      // 走 HTTPS 反向代理时可再打开：SESSION_COOKIE_SECURE: 'yes', TRUST_PROXY: '1'
-    }
-  }]
-}
-```
+pm2 请使用仓库根目录自带的 `ecosystem.config.js`，它已配置好全部变量、固定的工作目录和正确的启动路径：
 
 ```shell
+# 方式一：把变量写进 src/.env（不会入库），配置见上文
 pm2 start ecosystem.config.js && pm2 save
+
+# 方式二：启动前用 shell 环境变量注入（优先级高于 src/.env）
+HTTP_ALL_INTERFACES=yes HTTP_PORT=3000 \
+  ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret \
+  pm2 start ecosystem.config.js && pm2 save
+
 pm2 logs ztncui --lines 200
 ```
+
+**为什么必须用这个文件**：`bin/www` 在进程启动的第一行就读取 `HTTP_PORT`、`HTTP_ALL_INTERFACES` 等变量，而 `dotenv` 原本只在 `app.js` 里调用、且从当前工作目录找 `.env`。pm2 的工作目录通常不是 `src/`，导致 `.env` 根本没被加载，`HTTP_ALL_INTERFACES` 等设置静默失效。`ecosystem.config.js` 用绝对路径提前加载 `src/.env` 并显式注入所有变量，同时把工作目录固定在 `src`（`etc/passwd`、`etc/sessions`、`etc/tls` 都依赖这个相对路径），从任何目录启动都能生效。
+
+敏感信息不要写进 `ecosystem.config.js`（它会进 git），请用 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向密钥文件或写入 `src/.env`。
 
 Docker 示例见下一节。
 
@@ -228,6 +220,7 @@ Docker 示例见下一节。
 | `Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client` | 常见于“删除自己”或“删除 IP 分配”时一个请求响应了两次。这两处已修复。若仍出现，请贴出完整堆栈，通常能定位到具体控制器。 |
 | `malloc(): unaligned tcache chunk detected` / `_int_malloc` assertion | Node 进程堆内存已损坏，多由长期运行旧版本、内存泄漏或过旧 Node 版本引起。请升级到本分支要求的 Node 20，重启进程，并确认已应用上面的 session 修复。 |
 | `Initial password: ...` 没出现 | 密码是懒初始化的，需先提交一次登录表单才会生成；随后查看 stdout/out 日志，而不是 error 日志。 |
+| 设置了 `HTTP_ALL_INTERFACES` 却仍只监听 localhost | pm2 的工作目录不在 `src/` 时，`app.js` 里的 `dotenv` 找不到 `.env`，且 `bin/www` 在 dotenv 生效前就读取了变量。请改用仓库根目录的 `ecosystem.config.js` 启动，它会用绝对路径加载 `src/.env` 并显式注入全部变量。 |
 
 ## Docker
 
@@ -453,31 +446,23 @@ SESSION_TTL=86400
 # TRUST_PROXY=1
 ```
 
-Example pm2 `ecosystem.config.js`:
-
-```js
-module.exports = {
-  apps: [{
-    name: 'ztncui',
-    script: './src/bin/www',
-    env: {
-      NODE_ENV: 'production',
-      HTTP_PORT: '3000',
-      ZTNCUI_ADMIN_PASSWORD_FILE: '/etc/ztncui/admin_secret',
-      ZTNCUI_PASSWD_FILE: '/var/lib/zerotier-one/ztncui-passwd',
-      SESSION_SECRET: '<long-random-string>',
-      SESSION_DIR: '/var/lib/zerotier-one/ztncui-sessions',
-      SESSION_TTL: '86400'
-      // Behind HTTPS: SESSION_COOKIE_SECURE: 'yes', TRUST_PROXY: '1'
-    }
-  }]
-}
-```
+For pm2, use the `ecosystem.config.js` shipped at the repository root. It already defines all variables, a fixed working directory, and the correct entry point:
 
 ```shell
+# Option 1: put variables in src/.env (not committed); see the table above
 pm2 start ecosystem.config.js && pm2 save
+
+# Option 2: inject variables from the shell before starting (takes precedence over src/.env)
+HTTP_ALL_INTERFACES=yes HTTP_PORT=3000 \
+  ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret \
+  pm2 start ecosystem.config.js && pm2 save
+
 pm2 logs ztncui --lines 200
 ```
+
+**Why this file is required:** `bin/www` reads `HTTP_PORT`, `HTTP_ALL_INTERFACES`, and friends on the very first lines of the process, whereas `dotenv` was originally called only inside `app.js` and looks for `.env` relative to the current working directory. pm2 usually runs from a directory other than `src/`, so `.env` was never loaded and settings such as `HTTP_ALL_INTERFACES` silently failed. `ecosystem.config.js` loads `src/.env` via an absolute path up front, injects every variable explicitly, and pins the working directory to `src` (`etc/passwd`, `etc/sessions`, `etc/tls` all depend on that relative path), so it works no matter where you launch pm2 from.
+
+Never put plain-text passwords in `ecosystem.config.js` (it is committed to git). Use `ZTNCUI_ADMIN_PASSWORD_FILE` pointing to a secret file, or write them into `src/.env`.
 
 See the Docker section below for a container example.
 
@@ -489,6 +474,7 @@ See the Docker section below for a container example.
 | `Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client` | Usually caused by responding twice when deleting yourself or deleting an IP assignment. Both paths are fixed here. If it persists, share the full stack trace to identify the controller. |
 | `malloc(): unaligned tcache chunk detected` / `_int_malloc` assertion | The Node process heap is corrupted, typically from a long-running old build, a memory leak, or an outdated Node version. Upgrade to Node 20 as required by this fork, restart, and confirm the session fix is applied. |
 | No `Initial password: ...` line | Password initialization is lazy; submit the login form once to trigger it. Then check stdout/out logs, not the error log. |
+| `HTTP_ALL_INTERFACES` is set but the app still listens on localhost only | When pm2 runs outside `src/`, `dotenv` in `app.js` cannot find `.env`, and `bin/www` reads the variables before dotenv takes effect. Start with the repository-root `ecosystem.config.js`, which loads `src/.env` via an absolute path and injects every variable explicitly. |
 
 ## Docker
 
