@@ -212,16 +212,6 @@ pm2 logs ztncui --lines 200
 
 Docker 示例见下一节。
 
-## 日志与故障排查
-
-| 日志内容 | 含义与处理 |
-|---|---|
-| `Warning: connect.session() MemoryStore is not designed for a production environment` | 旧版本使用 Express 默认内存 session 存储，会持续泄漏内存。本分支已改为文件型存储（`SESSION_DIR`）。若仍看到此警告，说明进程仍是旧代码或没有重启。 |
-| `Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client` | 常见于“删除自己”或“删除 IP 分配”时一个请求响应了两次。这两处已修复。若仍出现，请贴出完整堆栈，通常能定位到具体控制器。 |
-| `malloc(): unaligned tcache chunk detected` / `_int_malloc` assertion | Node 进程堆内存已损坏，多由长期运行旧版本、内存泄漏或过旧 Node 版本引起。请升级到本分支要求的 Node 20，重启进程，并确认已应用上面的 session 修复。 |
-| `Initial password: ...` 没出现 | 密码是懒初始化的，需先提交一次登录表单才会生成；随后查看 stdout/out 日志，而不是 error 日志。 |
-| 设置了 `HTTP_ALL_INTERFACES` 却仍只监听 localhost | pm2 的工作目录不在 `src/` 时，`app.js` 里的 `dotenv` 找不到 `.env`，且 `bin/www` 在 dotenv 生效前就读取了变量。请改用仓库根目录的 `ecosystem.config.js` 启动，它会用绝对路径加载 `src/.env` 并显式注入全部变量。 |
-
 ## Docker
 
 仓库根目录提供多阶段构建的 `Dockerfile`，会同时安装 zerotier-one 与 ztncui：
@@ -465,16 +455,6 @@ pm2 logs ztncui --lines 200
 Never put plain-text passwords in `ecosystem.config.js` (it is committed to git). Use `ZTNCUI_ADMIN_PASSWORD_FILE` pointing to a secret file, or write them into `src/.env`.
 
 See the Docker section below for a container example.
-
-## Logs and troubleshooting
-
-| Log message | Meaning and action |
-|---|---|
-| `Warning: connect.session() MemoryStore is not designed for a production environment` | Older code used Express's in-memory session store, which leaks memory. This fork uses a file-backed store (`SESSION_DIR`). If you still see this, the process is running old code or has not been restarted. |
-| `Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client` | Usually caused by responding twice when deleting yourself or deleting an IP assignment. Both paths are fixed here. If it persists, share the full stack trace to identify the controller. |
-| `malloc(): unaligned tcache chunk detected` / `_int_malloc` assertion | The Node process heap is corrupted, typically from a long-running old build, a memory leak, or an outdated Node version. Upgrade to Node 20 as required by this fork, restart, and confirm the session fix is applied. |
-| No `Initial password: ...` line | Password initialization is lazy; submit the login form once to trigger it. Then check stdout/out logs, not the error log. |
-| `HTTP_ALL_INTERFACES` is set but the app still listens on localhost only | When pm2 runs outside `src/`, `dotenv` in `app.js` cannot find `.env`, and `bin/www` reads the variables before dotenv takes effect. Start with the repository-root `ecosystem.config.js`, which loads `src/.env` via an absolute path and injects every variable explicitly. |
 
 ## Docker
 
