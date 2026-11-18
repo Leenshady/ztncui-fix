@@ -20,7 +20,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
     ZT_ADDR=127.0.0.1:9993 \
     HTTP_PORT=3000 \
-    ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
+    ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd \
+    SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl gnupg \

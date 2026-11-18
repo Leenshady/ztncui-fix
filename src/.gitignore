@@ -1,6 +1,7 @@
 package-lock.json
 etc/passwd
 etc/storage/
+etc/sessions/
 node_modules/
 *.swp
 .env

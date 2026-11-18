@@ -170,6 +170,10 @@ pm2 logs ztncui --lines 200
 | `ZTNCUI_ADMIN_PASSWORD_FILE` | 未设置 | 初始密码文件路径，优先级高于上一项 |
 | `ZTNCUI_PASSWD_FILE` | `etc/passwd` | 用户密码库路径，Docker 镜像中指向挂载卷 |
 | `SESSION_SECRET` | 每次启动随机生成 | session 签名密钥；固定后重启仍可保持登录态 |
+| `SESSION_DIR` | `etc/sessions` | 文件型 session 存储目录；Docker 镜像中指向挂载卷 |
+| `SESSION_TTL` | `86400` | session 有效期（秒），同时作为 cookie `maxAge` 与过期文件清理周期 |
+| `SESSION_COOKIE_SECURE` | 未设置 | 设为 `yes` 时给 cookie 加 `Secure`；必须已启用 HTTPS |
+| `TRUST_PROXY` | 未设置 | 反向代理后启用 `trust proxy`，配合 `Secure` cookie 使用 |
 
 示例：`src/.env`
 
@@ -181,6 +185,11 @@ NODE_ENV=production
 ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
 ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
 SESSION_SECRET=<openssl rand -hex 32 生成的值>
+SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+SESSION_TTL=86400
+# 仅在已启用 HTTPS / 反向代理时打开下面两项
+# SESSION_COOKIE_SECURE=yes
+# TRUST_PROXY=1
 ```
 
 示例：pm2 `ecosystem.config.js`
@@ -195,7 +204,10 @@ module.exports = {
       HTTP_PORT: '3000',
       ZTNCUI_ADMIN_PASSWORD_FILE: '/etc/ztncui/admin_secret',
       ZTNCUI_PASSWD_FILE: '/var/lib/zerotier-one/ztncui-passwd',
-      SESSION_SECRET: '<long-random-string>'
+      SESSION_SECRET: '<long-random-string>',
+      SESSION_DIR: '/var/lib/zerotier-one/ztncui-sessions',
+      SESSION_TTL: '86400'
+      // 走 HTTPS 反向代理时可再打开：SESSION_COOKIE_SECURE: 'yes', TRUST_PROXY: '1'
     }
   }]
 }
@@ -207,6 +219,15 @@ pm2 logs ztncui --lines 200
 ```
 
 Docker 示例见下一节。
+
+## 日志与故障排查
+
+| 日志内容 | 含义与处理 |
+|---|---|
+| `Warning: connect.session() MemoryStore is not designed for a production environment` | 旧版本使用 Express 默认内存 session 存储，会持续泄漏内存。本分支已改为文件型存储（`SESSION_DIR`）。若仍看到此警告，说明进程仍是旧代码或没有重启。 |
+| `Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client` | 常见于“删除自己”或“删除 IP 分配”时一个请求响应了两次。这两处已修复。若仍出现，请贴出完整堆栈，通常能定位到具体控制器。 |
+| `malloc(): unaligned tcache chunk detected` / `_int_malloc` assertion | Node 进程堆内存已损坏，多由长期运行旧版本、内存泄漏或过旧 Node 版本引起。请升级到本分支要求的 Node 20，重启进程，并确认已应用上面的 session 修复。 |
+| `Initial password: ...` 没出现 | 密码是懒初始化的，需先提交一次登录表单才会生成；随后查看 stdout/out 日志，而不是 error 日志。 |
 
 ## Docker
 
@@ -230,7 +251,7 @@ docker run -d --name ztncui-fix \
 
 如不使用 host 网络，请至少映射 `-p 3000:3000 -p 9993:9993/udp`，并额外加 `-e HTTP_ALL_INTERFACES=yes`（镜像默认只监听 `localhost`）。对外提供访问时请务必经由 HTTPS 反向代理。
 
-镜像**不包含默认口令**。首次启动会在挂载卷的 `/var/lib/zerotier-one/ztncui-passwd` 生成随机密码，可用 `docker logs ztncui-fix` 查看一次；容器重建后仍读取同一文件。也可挂载密钥文件后传入 `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`。首次登录会强制修改密码。identity 与 `authtoken.secret` 同样只生成在挂载卷中，镜像本身不含任何身份密钥。
+镜像**不包含默认口令**。首次启动会在挂载卷的 `/var/lib/zerotier-one/ztncui-passwd` 生成随机密码，可用 `docker logs ztncui-fix` 查看一次；容器重建后仍读取同一文件。也可挂载密钥文件后传入 `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`。首次登录会强制修改密码。session 文件写入挂载卷的 `ztncui-sessions/` 目录，不会随容器重建丢失。identity 与 `authtoken.secret` 同样只生成在挂载卷中，镜像本身不含任何身份密钥。
 
 ## 许可证
 
@@ -410,6 +431,10 @@ All parameters are environment variables: put them in `src/.env` for source inst
 | `ZTNCUI_ADMIN_PASSWORD_FILE` | unset | Path to the initial password file; takes precedence |
 | `ZTNCUI_PASSWD_FILE` | `etc/passwd` | User password store; points to the mounted volume in Docker |
 | `SESSION_SECRET` | random per start | Session signing secret; set it to keep sessions across restarts |
+| `SESSION_DIR` | `etc/sessions` | File-backed session directory; points to the mounted volume in Docker |
+| `SESSION_TTL` | `86400` | Session lifetime in seconds; also used as cookie `maxAge` and file reaper interval |
+| `SESSION_COOKIE_SECURE` | unset | Set to `yes` to add `Secure` to cookies; requires HTTPS |
+| `TRUST_PROXY` | unset | Enable `trust proxy` behind a reverse proxy, needed with `Secure` cookies |
 
 Example `src/.env`:
 
@@ -421,6 +446,11 @@ NODE_ENV=production
 ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
 ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
 SESSION_SECRET=<value from openssl rand -hex 32>
+SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+SESSION_TTL=86400
+# Only enable these behind HTTPS / a reverse proxy
+# SESSION_COOKIE_SECURE=yes
+# TRUST_PROXY=1
 ```
 
 Example pm2 `ecosystem.config.js`:
@@ -435,7 +465,10 @@ module.exports = {
       HTTP_PORT: '3000',
       ZTNCUI_ADMIN_PASSWORD_FILE: '/etc/ztncui/admin_secret',
       ZTNCUI_PASSWD_FILE: '/var/lib/zerotier-one/ztncui-passwd',
-      SESSION_SECRET: '<long-random-string>'
+      SESSION_SECRET: '<long-random-string>',
+      SESSION_DIR: '/var/lib/zerotier-one/ztncui-sessions',
+      SESSION_TTL: '86400'
+      // Behind HTTPS: SESSION_COOKIE_SECURE: 'yes', TRUST_PROXY: '1'
     }
   }]
 }
@@ -447,6 +480,15 @@ pm2 logs ztncui --lines 200
 ```
 
 See the Docker section below for a container example.
+
+## Logs and troubleshooting
+
+| Log message | Meaning and action |
+|---|---|
+| `Warning: connect.session() MemoryStore is not designed for a production environment` | Older code used Express's in-memory session store, which leaks memory. This fork uses a file-backed store (`SESSION_DIR`). If you still see this, the process is running old code or has not been restarted. |
+| `Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client` | Usually caused by responding twice when deleting yourself or deleting an IP assignment. Both paths are fixed here. If it persists, share the full stack trace to identify the controller. |
+| `malloc(): unaligned tcache chunk detected` / `_int_malloc` assertion | The Node process heap is corrupted, typically from a long-running old build, a memory leak, or an outdated Node version. Upgrade to Node 20 as required by this fork, restart, and confirm the session fix is applied. |
+| No `Initial password: ...` line | Password initialization is lazy; submit the login form once to trigger it. Then check stdout/out logs, not the error log. |
 
 ## Docker
 
@@ -470,7 +512,7 @@ docker run -d --name ztncui-fix \
 
 If host networking is not used, map at least `-p 3000:3000 -p 9993:9993/udp` and add `-e HTTP_ALL_INTERFACES=yes` (the image listens on `localhost` only by default). Always terminate HTTPS at a reverse proxy before exposing it.
 
-The image contains **no default password**. On first start a random password is written to `/var/lib/zerotier-one/ztncui-passwd` on the mounted volume; read it once with `docker logs ztncui-fix`. It survives container recreation. You can also mount a secret file and pass `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`. The first login forces a password change. Identity files and `authtoken.secret` are likewise generated only in the mounted volume; the image contains no identity keys.
+The image contains **no default password**. On first start a random password is written to `/var/lib/zerotier-one/ztncui-passwd` on the mounted volume; read it once with `docker logs ztncui-fix`. It survives container recreation. You can also mount a secret file and pass `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`. The first login forces a password change. Session files are written to `ztncui-sessions/` on the mounted volume and survive container recreation. Identity files and `authtoken.secret` are likewise generated only in the mounted volume; the image contains no identity keys.
 
 ## License
 

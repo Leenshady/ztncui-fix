@@ -15,6 +15,7 @@ const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const expressValidator = require('express-validator');
 const session = require('express-session');
+const FileSessionStore = require('./lib/fileSessionStore');
 const helmet = require('helmet');
 
 const index = require('./routes/index');
@@ -26,6 +27,13 @@ const app = express();
 // A stable secret can be supplied for multi-instance / restarted deployments.
 // Otherwise use a cryptographically strong random value, never Math.random().
 const session_secret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const parsed_ttl = parseInt(process.env.SESSION_TTL || '86400', 10);
+const session_ttl_seconds = Number.isFinite(parsed_ttl) && parsed_ttl > 0 ? parsed_ttl : 86400;
+
+// Needed when secure cookies are used behind a reverse proxy.
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', 1);
+}
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
@@ -39,7 +47,17 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(session({
   resave: false,
   saveUninitialized: false,
-  secret: session_secret
+  secret: session_secret,
+  store: new FileSessionStore({
+    path: process.env.SESSION_DIR || 'etc/sessions',
+    ttl: session_ttl_seconds
+  }),
+  cookie: {
+    maxAge: session_ttl_seconds * 1000,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.SESSION_COOKIE_SECURE === 'yes'
+  }
 }));
 app.use(expressValidator());
 app.use(cookieParser());

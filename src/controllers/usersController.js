@@ -246,9 +246,11 @@ exports.user_delete = async function(req, res) {
   }
 
   const user = Object.prototype.hasOwnProperty.call(users, req.params.name) ? users[req.params.name] : null;
+  const isSelf = user && req.session.user && req.session.user.name === user.name;
 
-  if (user && (req.session.user.name === user.name)) {
-    res.render('user_delete', { title: 'Delete user', navigate: navigate, user: user, self_delete: true });
+  // Never delete the currently logged-in admin, and never respond twice.
+  if (isSelf) {
+    return res.render('user_delete', { title: 'Delete user', navigate: navigate, user: user, self_delete: true });
   }
 
   if (req.body.delete === 'delete') {

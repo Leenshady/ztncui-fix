@@ -12,6 +12,14 @@ const util = require('util');
 
 storage.initSync({dir: 'etc/storage'});
 
+// Dynamic res.render(req.params.object) must never be able to reach views
+// outside the small set the UI actually uses.
+const NETWORK_OBJECT_VIEWS = new Set([
+  'private', 'routes', 'ipAssignmentPools', 'v4AssignMode',
+  'v6AssignMode', 'dns', 'relays'
+]);
+const MEMBER_OBJECT_VIEWS = new Set(['ipAssignments']);
+
 // ZeroTier 1.14+ can store a member name in the controller itself, while older
 // controllers cannot. Prefer the controller value so names set through either
 // ztncui or the ZeroTier API stay in sync (upstream issue #144).
@@ -221,21 +229,32 @@ exports.network_object = async function(req, res) {
       active: 'networks',
       whence: ''
     }
+  const view = req.params.object;
+
+  if (!NETWORK_OBJECT_VIEWS.has(view)) {
+    return res.render('not_implemented', {
+      title: view, navigate: navigate, network: {nwid: req.params.nwid}
+    });
+  }
 
   try {
     const network = await zt.network_detail(req.params.nwid);
     navigate.whence = '/controller/network/' + network.nwid;
-    res.render(req.params.object, {title: req.params.object, navigate: navigate, network: network}, function(err, html) {
+    res.render(view, {title: view, navigate: navigate, network: network}, function(err, html) {
+      if (res.headersSent) return;
       if (err) {
-        if (err.message.indexOf('Failed to lookup view') !== -1 ) {
-          return res.render('not_implemented', {title: req.params.object, navigate: navigate, network: network});
-        }
-        throw err;
+        return res.render('not_implemented', {title: view, navigate: navigate, network: network});
       }
       res.send(html);
     });
   } catch (err) {
-    res.render(req.params.object, {title: req.params.object, navigate: navigate, error: 'Error resolving detail for network ' + req.params.nwid + ': ' + err});
+    if (res.headersSent) return;
+    res.render('error', {
+      title: view,
+      navigate: navigate,
+      message: 'Error resolving network',
+      error: {status: 500, stack: 'Network ' + req.params.nwid + ': ' + err.message}
+    });
   }
 }
 
@@ -570,8 +589,14 @@ exports.member_detail = async function(req, res) {
     navigate.whence = '/controller/network/' + network.nwid + '#members';
     res.render('member_detail', {title: 'Network member detail', navigate: navigate, network: network, member: member});
   } catch (err) {
+    if (res.headersSent) return;
     console.error(err);
-    res.render('error', {title: req.params.object, navigate: navigate, error: 'Error resolving detail for member ' + req.params.id + ' of network ' + req.params.nwid + ': ' + err});
+    res.render('error', {
+      title: 'Member detail',
+      navigate: navigate,
+      message: 'Error resolving member',
+      error: {status: 500, stack: 'Member ' + req.params.id + ' of network ' + req.params.nwid + ': ' + err.message}
+    });
   }
 };
 
@@ -582,21 +607,32 @@ exports.member_object = async function(req, res) {
       active: 'networks',
       whence: ''
     }
+  const view = req.params.object;
+
+  if (!MEMBER_OBJECT_VIEWS.has(view)) {
+    return res.render('not_implemented', {
+      title: view, navigate: navigate, network: {nwid: req.params.nwid}
+    });
+  }
 
   try {
     const {network, member} = await get_network_member(req.params.nwid, req.params.id);
     navigate.whence = '/controller/network/' + network.nwid + '#members';
-    res.render(req.params.object, {title: req.params.object, navigate: navigate, network: network, member: member}, function(err, html) {
+    res.render(view, {title: view, navigate: navigate, network: network, member: member}, function(err, html) {
+      if (res.headersSent) return;
       if (err) {
-        if (err.message.indexOf('Failed to lookup view') !== -1 ) {
-          return res.render('not_implemented', {title: req.params.object, navigate: navigate, network: network, member: member});
-        }
-        throw err;
+        return res.render('not_implemented', {title: view, navigate: navigate, network: network, member: member});
       }
       res.send(html);
     });
   } catch (err) {
-    res.render(req.params.object, {title: req.params.object, navigate: navigate, error: 'Error resolving detail for member ' + req.params.id + ' of network ' + req.params.nwid + ': ' + err});
+    if (res.headersSent) return;
+    res.render('error', {
+      title: view,
+      navigate: navigate,
+      message: 'Error resolving member',
+      error: {status: 500, stack: 'Member ' + req.params.id + ' of network ' + req.params.nwid + ': ' + err.message}
+    });
   }
 }
 
@@ -794,7 +830,7 @@ exports.delete_ip = async function(req, res) {
     if (req.params.index) {
       member = await zt.ipAssignmentDelete(network.nwid, member.id,
                                                               req.params.index);
-      res.redirect('/controller/network/' + network.nwid + '/member/' +
+      return res.redirect('/controller/network/' + network.nwid + '/member/' +
                                                   member.id + '/ipAssignments');
     }
     res.render('ipAssignments', {title: 'ipAssignments ' + network.name,
