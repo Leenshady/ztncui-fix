@@ -37,6 +37,8 @@ require(path.join(SRC, 'lib', 'config'));
 
 // ztncui 识别的全部环境变量。只注入有真实值的项；空值交给应用使用内置默认值，
 // 避免空字符串意外覆盖默认端口、或触发密码初始化的分支。
+// 密码库、session 目录、session 签名密钥的位置由 ZTNCUI_DATA_DIR 固定派生，
+// 不再作为独立变量注入。
 const KEYS = [
   'ZT_TOKEN',
   'ZT_ADDR',
@@ -47,11 +49,8 @@ const KEYS = [
   'NODE_ENV',
   'ZTNCUI_ADMIN_PASSWORD',
   'ZTNCUI_ADMIN_PASSWORD_FILE',
-  'ZTNCUI_PASSWD_FILE',
   'ZTNCUI_DATA_DIR',
   'ZTNCUI_ENV_FILE',
-  'SESSION_SECRET',
-  'SESSION_DIR',
   'SESSION_TTL',
   'SESSION_COOKIE_SECURE',
   'TRUST_PROXY'

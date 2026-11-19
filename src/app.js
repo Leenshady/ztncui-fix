@@ -23,8 +23,8 @@ const zt_controller = require('./routes/zt_controller');
 
 const app = express();
 
-// Explicit SESSION_SECRET wins. Otherwise generate a strong secret once and
-// keep it in the data directory so restarts / upgrades preserve login state.
+// Generate a strong signing secret once and keep it in the data directory so
+// restarts / upgrades preserve login state. The location is fixed.
 const session_secret = config.getSessionSecret();
 const parsed_ttl = parseInt(process.env.SESSION_TTL || '86400', 10);
 const session_ttl_seconds = Number.isFinite(parsed_ttl) && parsed_ttl > 0 ? parsed_ttl : 86400;

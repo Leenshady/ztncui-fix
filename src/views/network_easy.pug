@@ -1,5 +1,5 @@
 //-
-  ztncui - ZeroTier network controller UI
+  ztncui-fix - ZeroTier network controller UI
   Copyright (C) 2017-2021  Key Networks (https://key-networks.com)
   Licensed under GPLv3 - see LICENSE for details.
 
@@ -38,7 +38,7 @@ block net_content
         let net32 = 0 >>> 0;
         net32 = (net[0]<<24) + (net[1]<<16) + (net[2]<<8) + (net[3]);
         net32 &= ~host32;
-        bcast32 = net32 + host32;
+        const bcast32 = net32 + host32;
         const networkCIDR = document.getElementById('networkCIDR');
         const poolStart = document.getElementById('poolStart');
         const poolEnd = document.getElementById('poolEnd');

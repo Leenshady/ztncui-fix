@@ -1,13 +1,15 @@
 # Upgrade without losing configuration:
-#   docker compose pull && docker compose up -d
+#   git pull && docker compose up -d --build
 # NEVER add `-v` to `docker compose down`: it deletes the volume below.
 #
-# All mutable state lives in that single volume:
-#   /var/lib/zerotier-one/ztncui-passwd            admin accounts
-#   /var/lib/zerotier-one/ztncui-sessions          sessions
-#   /var/lib/zerotier-one/ztncui-data/tls          TLS certificates
-#   /var/lib/zerotier-one/ztncui-data/session.secret
-#   /var/lib/zerotier-one/ztncui-data/.env         optional, see README
+# All mutable state lives under one fixed data directory on that volume:
+#   /var/lib/zerotier-one/ztncui-data/passwd          admin accounts
+#   /var/lib/zerotier-one/ztncui-data/sessions        sessions
+#   /var/lib/zerotier-one/ztncui-data/tls             TLS certificates
+#   /var/lib/zerotier-one/ztncui-data/session.secret  session signing key
+#   /var/lib/zerotier-one/ztncui-data/storage         member notes
+#   /var/lib/zerotier-one/ztncui-data/.env            optional, see README
+# These sub-paths are fixed; only ZTNCUI_DATA_DIR itself is configurable.
 services:
   ztncui:
     build: .

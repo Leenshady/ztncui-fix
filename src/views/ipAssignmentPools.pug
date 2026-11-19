@@ -1,5 +1,5 @@
 //-
-  ztncui - ZeroTier network controller UI
+  ztncui-fix - ZeroTier network controller UI
   Copyright (C) 2017-2021  Key Networks (https://key-networks.com)
   Licensed under GPLv3 - see LICENSE for details.
 
@@ -29,13 +29,13 @@ block net_content
     .form-group.row
       .col-sm-2
         label(for='ipRangeStart') IP range start:
-      .col-sm-12
+      .col-sm-10
         input#ipRangeStart.form-control(type='text' name='ipRangeStart' placeholder='IP range start' value=(undefined===ipAssignmentPool? '' : ipAssignmentPool.ipRangeStart))
 
     .form-group.row
       .col-sm-2
         label(for='ipRangeEnd') IP range end:
-      .col-sm-12
+      .col-sm-10
         input#ipRangeEnd.form-control(type='text' name='ipRangeEnd' placeholder='IP range end' value=(undefined===ipAssignmentPool? '' : ipAssignmentPool.ipRangeEnd))
 
     .form-group.row

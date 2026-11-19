@@ -112,9 +112,9 @@ exports.index = async function(req, res) {
 
   try {
     const zt_status = await zt.get_zt_status();
-    res.render('index', {title: 'ztncui', navigate: navigate, zt_status});
+    res.render('index', {title: 'ztncui-fix', navigate: navigate, zt_status});
   } catch (err) {
-    res.render('index', {title: 'ztncui',
+    res.render('index', {title: 'ztncui-fix',
                       navigate: navigate, error: 'ERROR getting ZT status: ' + err});
   }
 };

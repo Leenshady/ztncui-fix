@@ -1,10 +1,11 @@
 /*
   ztncui - centralized configuration and persistent paths.
 
-  Mutable state (password store, sessions, TLS certs, session secret) is
-  derived from a single data directory so an upgrade only has to preserve
-  that one location. ZTNCUI_DATA_DIR defaults to src/etc, which keeps the
-  historical layout and makes this change backward compatible.
+  Mutable state (password store, sessions, TLS certs, session secret, member
+  notes) is derived from a single data directory so an upgrade only has to
+  preserve that one location. ZTNCUI_DATA_DIR defaults to src/etc, which keeps
+  the historical layout. The individual paths are intentionally fixed: only
+  the data directory itself is configurable.
 */
 
 'use strict';
@@ -46,19 +47,20 @@ const config = {
   SRC: SRC,
   DATA_DIR: DATA_DIR,
   ENV_FILE: dataEnvFile,
-  // Explicit legacy variables still take precedence over the data directory.
-  passwdFile: process.env.ZTNCUI_PASSWD_FILE || path.join(DATA_DIR, 'passwd'),
-  sessionDir: process.env.SESSION_DIR || path.join(DATA_DIR, 'sessions'),
+  // These locations are fixed relative to the data directory. They are not
+  // configurable via environment variables: point ZTNCUI_DATA_DIR elsewhere
+  // if you need to relocate all mutable state together.
+  passwdFile: path.join(DATA_DIR, 'passwd'),
+  sessionDir: path.join(DATA_DIR, 'sessions'),
   tlsDir: path.join(DATA_DIR, 'tls'),
   storageDir: path.join(DATA_DIR, 'storage'),
   secretFile: path.join(DATA_DIR, 'session.secret')
 };
 
 // Persist a generated signing secret so a restart / upgrade keeps sessions
-// valid. An explicit SESSION_SECRET always takes precedence and writes nothing.
+// valid. The secret always lives in the data directory; SESSION_SECRET is no
+// longer accepted as an override.
 config.getSessionSecret = function() {
-  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
-
   try {
     const existing = fs.readFileSync(config.secretFile, 'utf8').trim();
     if (existing) return existing;

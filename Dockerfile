@@ -20,8 +20,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
     ZT_ADDR=127.0.0.1:9993 \
     HTTP_PORT=3000 \
-    ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd \
-    SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions \
     ZTNCUI_DATA_DIR=/var/lib/zerotier-one/ztncui-data
 
 RUN apt-get update \
@@ -41,10 +39,10 @@ COPY src/ ./
 COPY --from=deps /app/src/node_modules ./node_modules
 
 # No default password is baked into the image. On first start ztncui creates
-# a random admin password in ZTNCUI_PASSWD_FILE (the mounted ZT volume).
-# ZTNCUI_DATA_DIR keeps TLS certs, a generated session.secret and an optional
-# .env on that same volume. PASSWD_FILE / SESSION_DIR remain explicit so
-# volumes created by earlier images keep working after an upgrade.
+# a random admin password in $ZTNCUI_DATA_DIR/passwd on the mounted volume.
+# Sessions, TLS certs, the generated session.secret, member notes and an
+# optional .env all live under that same data directory. These paths are
+# fixed; only ZTNCUI_DATA_DIR itself is configurable.
 
 VOLUME ["/var/lib/zerotier-one"]
 EXPOSE 3000 9993/udp

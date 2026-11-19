@@ -10,8 +10,7 @@ const argon2 = require('argon2');
 const util = require('util');
 const config = require('../lib/config');
 
-// The store lives in the persistent data directory; an explicit
-// ZTNCUI_PASSWD_FILE still wins for backward compatibility.
+// The store lives at $ZTNCUI_DATA_DIR/passwd; its location is fixed.
 const passwd_file = config.passwdFile;
 const min_pass_len = 10;
 

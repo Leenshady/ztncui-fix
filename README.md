@@ -65,7 +65,7 @@ npm start
 
 密码文件在**应用启动时**创建，无需先尝试登录。**推荐不设置初始密码变量**，让应用随机生成密码并立即打印到控制台。规则如下：
 
-1. 若 `ZTNCUI_PASSWD_FILE`（默认 `etc/passwd`）不存在：
+1. 若密码库 `$DATA_DIR/passwd`（默认 `src/etc/passwd`）不存在：
    - 优先读取 `ZTNCUI_ADMIN_PASSWORD_FILE` 指向的纯文本文件；
    - 其次读取环境变量 `ZTNCUI_ADMIN_PASSWORD`；
    - 两者都没有时，用 `crypto.randomBytes(24).toString('base64url')` 生成随机密码。
@@ -146,7 +146,7 @@ Docker 中只读挂载：
 - 尚未初始化：删除密码库后重启即可，启动时会重新生成一组密码：
 
 ```shell
-rm /path/to/ztncui-passwd
+rm /path/to/ztncui-data/passwd
 pm2 restart ztncui
 pm2 logs ztncui --lines 200
 ```
@@ -155,27 +155,24 @@ pm2 logs ztncui --lines 200
 
 ## 启动参数
 
-所有参数都通过环境变量传入：源码运行和 pm2 统一写在 `src/.env`，Docker 使用 `-e` 或 `--env-file`。
+所有参数都通过环境变量传入：源码运行和 pm2 统一写在 `src/.env`，Docker 使用 `-e` 或 `--env-file`。密码库、session 目录与签名密钥的位置固定由 `ZTNCUI_DATA_DIR` 派生，不再作为独立参数。
 
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `ZT_TOKEN` | 读取 `/var/lib/zerotier-one/authtoken.secret` | ZeroTier 本地控制 API 的 token |
-| `ZT_ADDR` | `127.0.0.1:9993` | 控制器 API 地址 |
-| `HTTP_PORT` | `3000` | HTTP 监听端口 |
-| `HTTP_ALL_INTERFACES` | 未设置 | 设置后监听所有网卡；否则只监听 `localhost` |
-| `HTTPS_PORT` | 未设置 | 启用 HTTPS 的端口；证书为 `etc/tls/fullchain.pem` 与 `etc/tls/privkey.pem` |
-| `HTTPS_HOST` | 未设置 | HTTPS 监听地址；未设置时监听所有网卡 |
-| `NODE_ENV` | 未设置 | 生产环境设为 `production` |
-| `ZTNCUI_ADMIN_PASSWORD` | 未设置 | 初始 admin 密码；与下一项二选一 |
-| `ZTNCUI_ADMIN_PASSWORD_FILE` | 未设置 | 初始密码文件路径，优先级高于上一项 |
-| `ZTNCUI_PASSWD_FILE` | `$ZTNCUI_DATA_DIR/passwd`（默认 `etc/passwd`） | 用户密码库路径；显式设置时优先级高于数据目录，Docker 镜像中指向挂载卷 |
-| `ZTNCUI_DATA_DIR` | `src/etc` | 统一数据目录：密码库、session、TLS 证书、签名密钥的根目录；指向源码树外即可在升级中保留 |
-| `ZTNCUI_ENV_FILE` | `src/.env` | 引导 env 文件；此外还会读取数据目录内的 `.env`，真实环境变量始终优先 |
-| `SESSION_SECRET` | 保存到 `$ZTNCUI_DATA_DIR/session.secret` | session 签名密钥；未显式设置时自动生成一次并持久化，重启/升级不掉登录 |
-| `SESSION_DIR` | `etc/sessions` | 文件型 session 存储目录；Docker 镜像中指向挂载卷 |
-| `SESSION_TTL` | `86400` | session 有效期（秒），同时作为 cookie `maxAge` 与过期文件清理周期 |
-| `SESSION_COOKIE_SECURE` | 未设置 | 设为 `yes` 时给 cookie 加 `Secure`；必须已启用 HTTPS |
-| `TRUST_PROXY` | 未设置 | 反向代理后启用 `trust proxy`，配合 `Secure` cookie 使用 |
+| 变量                           | 默认值                                         | 说明                                                                            |
+| ---------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------- |
+| `ZT_TOKEN`                   | 读取 `/var/lib/zerotier-one/authtoken.secret` | ZeroTier 本地控制 API 的 token                                                     |
+| `ZT_ADDR`                    | `127.0.0.1:9993`                            | 控制器 API 地址                                                                    |
+| `HTTP_PORT`                  | `3000`                                      | HTTP 监听端口                                                                     |
+| `HTTP_ALL_INTERFACES`        | 未设置                                         | 设置后监听所有网卡；否则只监听 `localhost`                                                   |
+| `HTTPS_PORT`                 | 未设置                                         | 启用 HTTPS 的端口；证书为 `$DATA_DIR/tls/fullchain.pem` 与 `privkey.pem`（默认 `etc/tls/`） |
+| `HTTPS_HOST`                 | 未设置                                         | HTTPS 监听地址；未设置时监听所有网卡                                                         |
+| `NODE_ENV`                   | 未设置                                         | 生产环境设为 `production`                                                           |
+| `ZTNCUI_ADMIN_PASSWORD`      | 未设置                                         | 初始 admin 密码；与下一项二选一                                                           |
+| `ZTNCUI_ADMIN_PASSWORD_FILE` | 未设置                                         | 初始密码文件路径，优先级高于上一项                                                             |
+| `ZTNCUI_DATA_DIR`            | `src/etc`                                   | 统一数据目录：密码库、session、TLS 证书、签名密钥与成员备注的根目录；子路径固定，指向源码树外即可在升级中保留              |
+| `ZTNCUI_ENV_FILE`            | `src/.env`                                  | 引导 env 文件；此外还会读取数据目录内的 `.env`，真实环境变量始终优先                                      |
+| `SESSION_TTL`                | `86400`                                     | session 有效期（秒），同时作为 cookie `maxAge` 与过期文件清理周期                                 |
+| `SESSION_COOKIE_SECURE`      | 未设置                                         | 设为 `yes` 时给 cookie 加 `Secure`；必须已启用 HTTPS                                     |
+| `TRUST_PROXY`                | 未设置                                         | 反向代理后启用 `trust proxy`，配合 `Secure` cookie 使用                                   |
 
 示例：`src/.env`（源码 / pm2 部署；Docker 镜像已把数据目录预设在卷内，无需重复设置 `ZTNCUI_DATA_DIR`）：
 
@@ -193,14 +190,10 @@ NODE_ENV=production
 # 若要自己指定初始密码，再取消下面这行的注释，指向一个纯文本密码文件（不是密码库，建议 0600 权限）：
 # ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
 
-# 密码库与 session 目录默认由 ZTNCUI_DATA_DIR 派生：
-#   $ZTNCUI_DATA_DIR/passwd、$ZTNCUI_DATA_DIR/sessions
-# 仅在需要覆盖时才显式指定下面两项：
-# ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
-# SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+# 密码库、session、签名密钥与成员备注的位置固定由 ZTNCUI_DATA_DIR 派生：
+#   passwd、sessions/、session.secret、storage/
+# 这些路径不再接受单独的覆盖变量。
 
-# 留空时自动生成一次并保存到 $ZTNCUI_DATA_DIR/session.secret，重启不掉登录
-# SESSION_SECRET=<openssl rand -hex 32 生成的值>
 SESSION_TTL=86400
 
 # 可选：换一个引导 .env 的位置；此外仍会读取 $ZTNCUI_DATA_DIR/.env
@@ -256,20 +249,20 @@ docker run -d --name ztncui-fix \
 
 镜像**不包含默认口令**。推荐不设置初始密码变量：首次启动会生成随机密码并打印到控制台，用 `docker logs ztncui-fix | grep 'Initial password'` 查看一次；首次登录强制改密，容器重建后仍读取同一文件。如需自己指定初始密码，可只读挂载一个纯文本密码文件并传入 `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password`（见上节）。
 
-所有可变状态都在同一个挂载卷中：密码库 `ztncui-passwd`、session `ztncui-sessions/`、TLS 证书与签名密钥 `ztncui-data/`。容器重建后仍读取同一份数据。identity 与 `authtoken.secret` 同样只生成在挂载卷中，镜像本身不含任何身份密钥。
+所有可变状态都在挂载卷的 `ztncui-data/` 目录中：`passwd`、`sessions/`、`tls/`、`session.secret`、`storage/`。这些路径固定，只有 `ZTNCUI_DATA_DIR` 可配置。容器重建后仍读取同一份数据。identity 与 `authtoken.secret` 同样只生成在挂载卷中，镜像本身不含任何身份密钥。
 
 ## 升级与配置保留
 
 可变状态（账号、session、证书、启动参数）默认位于源码树的 `src/etc/`，升级时若替换整个 `src/` 目录就会丢失。本分支把它们收敛到 `ZTNCUI_DATA_DIR` 指定的**单一数据目录**，默认值仍是 `src/etc`，因此现有部署无需改动。
 
-| 状态 | 位置 | 覆盖方式 |
-|---|---|---|
-| 管理员密码库 | `$DATA_DIR/passwd` | `ZTNCUI_PASSWD_FILE` |
-| 文件型 session | `$DATA_DIR/sessions/` | `SESSION_DIR` |
-| session 签名密钥 | `$DATA_DIR/session.secret` | `SESSION_SECRET`（设置后不写文件） |
-| TLS 证书 | `$DATA_DIR/tls/fullchain.pem`、`privkey.pem` | — |
-| 成员备注（Member name） | `$DATA_DIR/storage/` | — |
-| 启动配置 | `src/.env`（引导）+ `$DATA_DIR/.env` | `ZTNCUI_ENV_FILE` |
+| 状态                | 位置                                          | 覆盖方式                      |
+| ----------------- | ------------------------------------------- | ------------------------- |
+| 管理员密码库            | `$DATA_DIR/passwd`                          | 固定 |
+| 文件型 session       | `$DATA_DIR/sessions/`                       | 固定 |
+| session 签名密钥      | `$DATA_DIR/session.secret`                  | 固定 |
+| TLS 证书            | `$DATA_DIR/tls/fullchain.pem`、`privkey.pem` | —                         |
+| 成员备注（Member name） | `$DATA_DIR/storage/`                        | —                         |
+| 启动配置              | `src/.env`（引导）+ `$DATA_DIR/.env`            | `ZTNCUI_ENV_FILE`         |
 
 成员备注同时写入 ZeroTier 控制器（1.14+）和 `$DATA_DIR/storage/`；旧版 `src/etc/storage/` 中的备注会在首次启动时自动迁移到数据目录。
 
@@ -299,15 +292,29 @@ cp src/.env /srv/ztncui-data/.env
 
 ### Docker 升级
 
-仓库根目录的 `docker-compose.yml` 用一个命名卷保存全部可变状态：
+仓库根目录的 `docker-compose.yml` 用一个命名卷保存全部可变状态。镜像由本地 `build: .` 构建（标签 `ztncui-fix:local`），没有远端 registry 可 `pull`，因此升级就是拉取源码后重建容器：
 
 ```shell
-docker compose pull && docker compose up -d
-# 修改了 Dockerfile 或本地源码时：
+cd /path/to/ztncui-fix
+git pull
 docker compose up -d --build
 ```
 
-**绝不要**执行 `docker compose down -v` 或 `docker volume rm ztncui-data`，那会删除密码库、session 以及 ZeroTier 身份文件。旧镜像创建的卷同样兼容：容器仍显式使用 `ztncui-passwd` 与 `ztncui-sessions` 原路径，TLS 证书和可选的 `.env` 放在卷内 `ztncui-data/` 子目录。若旧容器启用了 HTTPS，升级前先把 `etc/tls/*.pem` 复制到卷内 `ztncui-data/tls/`，新镜像会从那里读取证书。旧镜像的 `etc/storage/`（成员备注）若未挂载到卷，用 `docker cp ztncui-fix:/app/src/etc/storage ./storage-backup` 导出，再把内容放进卷内 `ztncui-data/storage/`。
+仅改动 compose 配置（未动源码或 Dockerfile）时，`docker compose up -d` 即可。
+
+**绝不要**执行 `docker compose down -v` 或 `docker volume rm ztncui-data`，那会删除密码库、session 以及 ZeroTier 身份文件。
+
+从旧镜像升级必须先迁移数据：新版把密码库和 session 固定在卷内 `ztncui-data/passwd` 与 `ztncui-data/sessions/`，不再读取卷根的 `ztncui-passwd` / `ztncui-sessions` 旧路径。不迁移则启动时会重新生成随机密码。启动新容器前执行：
+
+```shell
+docker run --rm -v ztncui-data:/data alpine sh -c '
+  mkdir -p /data/ztncui-data/sessions
+  if [ -f /data/ztncui-passwd ]; then mv /data/ztncui-passwd /data/ztncui-data/passwd; fi
+  if [ -d /data/ztncui-sessions ]; then mv /data/ztncui-sessions/* /data/ztncui-data/sessions/; fi
+'
+```
+
+若旧容器启用了 HTTPS，把 `etc/tls/*.pem` 复制到卷内 `ztncui-data/tls/`。旧镜像的 `etc/storage/`（成员备注）若未挂载到卷，用 `docker cp ztncui-fix:/app/src/etc/storage ./storage-backup` 导出，再把内容放进卷内 `ztncui-data/storage/`。
 
 ### 备份与恢复
 
@@ -345,6 +352,7 @@ A web UI for a self-hosted ZeroTier network controller.
 Upstream `key-networks/ztncui` has been inactive for a long time. This repository is a **maintenance fork** of it, and only accepts verified bug fixes, security fixes, compatibility updates, and a small number of clearly defined new API features.
 
 We do **not** submit pull requests upstream unless the upstream repository becomes active again. Issues and fixes are tracked in this repository.
+
 
 ## Features
 
@@ -399,7 +407,7 @@ This fork **does not ship a fixed default password**. `etc/default.passwd` is ke
 
 The password file is created **at application startup**, with no login attempt required. **Leaving the initial-password variables unset is recommended** — the app then generates a random password and prints it to the console immediately:
 
-1. If `ZTNCUI_PASSWD_FILE` (default `etc/passwd`) does not exist:
+1. If the password store `$DATA_DIR/passwd` (default `src/etc/passwd`) does not exist:
    - read the plain-text file pointed to by `ZTNCUI_ADMIN_PASSWORD_FILE` first;
    - otherwise read the `ZTNCUI_ADMIN_PASSWORD` environment variable;
    - otherwise generate a random password with `crypto.randomBytes(24).toString('base64url')`.
@@ -480,7 +488,7 @@ Mount it read-only in Docker:
 - If not yet initialized: delete the password store and restart; a new password is generated at startup:
 
 ```shell
-rm /path/to/ztncui-passwd
+rm /path/to/ztncui-data/passwd
 pm2 restart ztncui
 pm2 logs ztncui --lines 200
 ```
@@ -489,27 +497,24 @@ pm2 logs ztncui --lines 200
 
 ## Startup parameters
 
-All parameters are environment variables: put them in `src/.env` for both source installs and pm2, or pass them with `-e` / `--env-file` for Docker.
+All parameters are environment variables: put them in `src/.env` for both source installs and pm2, or pass them with `-e` / `--env-file` for Docker. The password store, session directory and signing secret are fixed under `ZTNCUI_DATA_DIR` and are no longer separate parameters.
 
-| Variable | Default | Description |
-|---|---|---|
-| `ZT_TOKEN` | read `/var/lib/zerotier-one/authtoken.secret` | Token for ZeroTier's local controller API |
-| `ZT_ADDR` | `127.0.0.1:9993` | Controller API address |
-| `HTTP_PORT` | `3000` | HTTP listen port |
-| `HTTP_ALL_INTERFACES` | unset | Bind all interfaces when set; otherwise `localhost` only |
-| `HTTPS_PORT` | unset | HTTPS port; certs are `etc/tls/fullchain.pem` and `etc/tls/privkey.pem` |
-| `HTTPS_HOST` | unset | HTTPS bind address; all interfaces when unset |
-| `NODE_ENV` | unset | Set to `production` for deployments |
-| `ZTNCUI_ADMIN_PASSWORD` | unset | Initial admin password; choose one of this or the next variable |
-| `ZTNCUI_ADMIN_PASSWORD_FILE` | unset | Path to the initial password file; takes precedence |
-| `ZTNCUI_PASSWD_FILE` | `$ZTNCUI_DATA_DIR/passwd` (default `etc/passwd`) | User password store; wins over the data directory when set, points to the mounted volume in Docker |
-| `ZTNCUI_DATA_DIR` | `src/etc` | Single data directory for the password store, sessions, TLS certs and session secret; point it outside the source tree to survive upgrades |
-| `ZTNCUI_ENV_FILE` | `src/.env` | Bootstrap env file; a `.env` inside the data directory is also read, real env vars always win |
-| `SESSION_SECRET` | saved to `$ZTNCUI_DATA_DIR/session.secret` | Session signing secret; when unset it is generated once and persisted, so restarts/upgrades keep sessions |
-| `SESSION_DIR` | `etc/sessions` | File-backed session directory; points to the mounted volume in Docker |
-| `SESSION_TTL` | `86400` | Session lifetime in seconds; also used as cookie `maxAge` and file reaper interval |
-| `SESSION_COOKIE_SECURE` | unset | Set to `yes` to add `Secure` to cookies; requires HTTPS |
-| `TRUST_PROXY` | unset | Enable `trust proxy` behind a reverse proxy, needed with `Secure` cookies |
+| Variable                     | Default                                          | Description                                                                                                                                |
+| ---------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ZT_TOKEN`                   | read `/var/lib/zerotier-one/authtoken.secret`    | Token for ZeroTier's local controller API                                                                                                  |
+| `ZT_ADDR`                    | `127.0.0.1:9993`                                 | Controller API address                                                                                                                     |
+| `HTTP_PORT`                  | `3000`                                           | HTTP listen port                                                                                                                           |
+| `HTTP_ALL_INTERFACES`        | unset                                            | Bind all interfaces when set; otherwise `localhost` only                                                                                   |
+| `HTTPS_PORT`                 | unset                                            | HTTPS port; certs are `$DATA_DIR/tls/fullchain.pem` and `privkey.pem` (default `etc/tls/`)                                                 |
+| `HTTPS_HOST`                 | unset                                            | HTTPS bind address; all interfaces when unset                                                                                              |
+| `NODE_ENV`                   | unset                                            | Set to `production` for deployments                                                                                                        |
+| `ZTNCUI_ADMIN_PASSWORD`      | unset                                            | Initial admin password; choose one of this or the next variable                                                                            |
+| `ZTNCUI_ADMIN_PASSWORD_FILE` | unset                                            | Path to the initial password file; takes precedence                                                                                        |
+| `ZTNCUI_DATA_DIR`            | `src/etc`                                        | Single data directory for the password store, sessions, TLS certs, session secret and member notes; sub-paths are fixed, point it outside the source tree to survive upgrades |
+| `ZTNCUI_ENV_FILE`            | `src/.env`                                       | Bootstrap env file; a `.env` inside the data directory is also read, real env vars always win                                              |
+| `SESSION_TTL`                | `86400`                                          | Session lifetime in seconds; also used as cookie `maxAge` and file reaper interval                                                         |
+| `SESSION_COOKIE_SECURE`      | unset                                            | Set to `yes` to add `Secure` to cookies; requires HTTPS                                                                                    |
+| `TRUST_PROXY`                | unset                                            | Enable `trust proxy` behind a reverse proxy, needed with `Secure` cookies                                                                  |
 
 Example `src/.env` (source / pm2 installs; the Docker image already places the data directory on the volume, so `ZTNCUI_DATA_DIR` is optional there):
 
@@ -530,15 +535,11 @@ NODE_ENV=production
 # plain-text password file (not the password store; mode 0600 recommended):
 # ZTNCUI_ADMIN_PASSWORD_FILE=/etc/ztncui/admin_secret
 
-# The password store and session directory are derived from ZTNCUI_DATA_DIR:
-#   $ZTNCUI_DATA_DIR/passwd, $ZTNCUI_DATA_DIR/sessions
-# Override them explicitly only when needed:
-# ZTNCUI_PASSWD_FILE=/var/lib/zerotier-one/ztncui-passwd
-# SESSION_DIR=/var/lib/zerotier-one/ztncui-sessions
+# The password store, session directory, signing secret and member notes are
+# fixed relative to ZTNCUI_DATA_DIR:
+#   passwd, sessions/, session.secret, storage/
+# They are no longer configurable through individual variables.
 
-# When left unset, a secret is generated once and saved to
-# $ZTNCUI_DATA_DIR/session.secret, so restarts keep sessions valid
-# SESSION_SECRET=<value from openssl rand -hex 32>
 SESSION_TTL=86400
 
 # Optional: relocate the bootstrap env file; $ZTNCUI_DATA_DIR/.env is also read
@@ -571,6 +572,7 @@ See the Docker section below for a container example.
 
 The repository root contains a multi-stage `Dockerfile` (installing both zerotier-one and ztncui) and a `docker-compose.yml`. **Compose is recommended** — it already configures host networking, the required capabilities, the TUN device and a named volume:
 
+
 ```shell
 docker compose up -d
 # After changing the Dockerfile or local sources:
@@ -594,7 +596,7 @@ If host networking is not used, map at least `-p 3000:3000 -p 9993:9993/udp` and
 
 The image contains **no default password**. Leaving the initial-password variables unset is recommended: a random password is generated and printed to the console on first start; read it once with `docker logs ztncui-fix | grep 'Initial password'`. The first login forces a change, and container recreation keeps reading the same file. To set your own initial password, mount a plain-text secret file read-only and pass `-e ZTNCUI_ADMIN_PASSWORD_FILE=/run/secrets/ztncui_admin_password` (see above).
 
-All mutable state lives on the same mounted volume: the password store `ztncui-passwd`, sessions in `ztncui-sessions/`, and TLS certs plus the session secret in `ztncui-data/`. Container recreation keeps reading the same data. Identity files and `authtoken.secret` are likewise generated only in the mounted volume; the image contains no identity keys.
+All mutable state lives under `ztncui-data/` on the mounted volume: `passwd`, `sessions/`, `tls/`, `session.secret` and `storage/`. These paths are fixed; only `ZTNCUI_DATA_DIR` is configurable. Container recreation keeps reading the same data. Identity files and `authtoken.secret` are likewise generated only in the mounted volume; the image contains no identity keys.
 
 ## Upgrades and preserving configuration
 
@@ -602,9 +604,9 @@ Mutable state (accounts, sessions, TLS certs, startup parameters) lives in `src/
 
 | State | Location | Overridden by |
 |---|---|---|
-| Admin password store | `$DATA_DIR/passwd` | `ZTNCUI_PASSWD_FILE` |
-| File-backed sessions | `$DATA_DIR/sessions/` | `SESSION_DIR` |
-| Session signing secret | `$DATA_DIR/session.secret` | `SESSION_SECRET` (no file written when set) |
+| Admin password store | `$DATA_DIR/passwd` | fixed |
+| File-backed sessions | `$DATA_DIR/sessions/` | fixed |
+| Session signing secret | `$DATA_DIR/session.secret` | fixed |
 | TLS certificates | `$DATA_DIR/tls/fullchain.pem`, `privkey.pem` | — |
 | Member notes (Member name) | `$DATA_DIR/storage/` | — |
 | Startup config | `src/.env` (bootstrap) + `$DATA_DIR/.env` | `ZTNCUI_ENV_FILE` |
@@ -637,15 +639,29 @@ After that, a single directory (`/srv/ztncui-data`) is all you need to keep acro
 
 ### Upgrading Docker
 
-The `docker-compose.yml` at the repository root keeps all mutable state in one named volume:
+The `docker-compose.yml` at the repository root keeps all mutable state in one named volume. The image is built locally with `build: .` (tagged `ztncui-fix:local`), so there is no remote registry to `pull` from — upgrading means pulling the source and rebuilding:
 
 ```shell
-docker compose pull && docker compose up -d
-# after changing the Dockerfile or local sources:
+cd /path/to/ztncui-fix
+git pull
 docker compose up -d --build
 ```
 
-**Never** run `docker compose down -v` or `docker volume rm ztncui-data` — that deletes the password store, sessions and ZeroTier identity files. Volumes created by earlier images still work: the container keeps using the original `ztncui-passwd` and `ztncui-sessions` paths, while TLS certs and the optional `.env` go under `ztncui-data/` in the same volume. If the old container used HTTPS, copy `etc/tls/*.pem` into `ztncui-data/tls/` on the volume before upgrading — the new image reads certs from there. Member notes in an old image's `etc/storage/` are not on the volume: export them with `docker cp ztncui-fix:/app/src/etc/storage ./storage-backup` and place them under `ztncui-data/storage/` on the volume.
+If you only changed the compose file (not the sources or Dockerfile), `docker compose up -d` is enough.
+
+**Never** run `docker compose down -v` or `docker volume rm ztncui-data` — that deletes the password store, sessions and ZeroTier identity files.
+
+Volumes from earlier images need a one-time migration before starting the new container: the password store and sessions are now fixed at `ztncui-data/passwd` and `ztncui-data/sessions/` on the volume; the old root-level `ztncui-passwd` / `ztncui-sessions` paths are no longer read. Without this step a fresh random password is generated:
+
+```shell
+docker run --rm -v ztncui-data:/data alpine sh -c '
+  mkdir -p /data/ztncui-data/sessions
+  if [ -f /data/ztncui-passwd ]; then mv /data/ztncui-passwd /data/ztncui-data/passwd; fi
+  if [ -d /data/ztncui-sessions ]; then mv /data/ztncui-sessions/* /data/ztncui-data/sessions/; fi
+'
+```
+
+If the old container used HTTPS, copy `etc/tls/*.pem` into `ztncui-data/tls/` on the volume. Member notes in an old image's `etc/storage/` are not on the volume: export them with `docker cp ztncui-fix:/app/src/etc/storage ./storage-backup` and place them under `ztncui-data/storage/` on the volume.
 
 ### Backup and restore
 
